@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net10.0-windows</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <LangVersion>latest</LangVersion>
+    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+    <PromeRotationDir>C:\Users\Administrator\AppData\Roaming\XIVLauncherCN\installedPlugins\PromeRotation\1.5.2.3</PromeRotationDir>
+    <DalamudHooksDir>C:\Users\Administrator\AppData\Roaming\XIVLauncherCN\addon\Hooks\26-06-27-01</DalamudHooksDir>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Los.csproj" />
+    <Reference Include="PromeRotation" HintPath="$(PromeRotationDir)\PromeRotation.dll" Private="true" />
+    <Reference Include="ECommons" HintPath="$(PromeRotationDir)\ECommons.dll" Private="true" />
+    <Reference Include="Dalamud" HintPath="$(DalamudHooksDir)\Dalamud.dll" Private="true" />
+    <Reference Include="Dalamud.Bindings.ImGui" HintPath="$(DalamudHooksDir)\Dalamud.Bindings.ImGui.dll" Private="true" />
+    <Reference Include="FFXIVClientStructs" HintPath="$(DalamudHooksDir)\FFXIVClientStructs.dll" Private="true" />
+    <Reference Include="Lumina" HintPath="$(DalamudHooksDir)\Lumina.dll" Private="true" />
+    <Reference Include="Lumina.Excel" HintPath="$(DalamudHooksDir)\Lumina.Excel.dll" Private="true" />
+  </ItemGroup>
+</Project>
