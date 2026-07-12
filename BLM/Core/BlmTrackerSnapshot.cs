@@ -1,4 +1,15 @@
+using System.Collections.Immutable;
+
 namespace LosPr.BLM.Core;
+
+public sealed record BlmTrackerDecisionSnapshot
+{
+    public static BlmTrackerDecisionSnapshot Empty { get; } = new();
+
+    public BlmTrackerSnapshot Snapshot { get; init; } = BlmTrackerSnapshot.Empty;
+    public ImmutableArray<BlmActionSuccess> RecentHistory { get; init; } = [];
+    public BlmActionSuccess? PreviousGcd { get; init; }
+}
 
 public sealed record BlmTrackerSnapshot
 {
@@ -14,10 +25,8 @@ public sealed record BlmTrackerSnapshot
     public long ParadoxUsedIceSerial { get; init; }
     public int Fire4Count { get; init; }
     public int Fire4CountSinceManafont { get; init; }
-    public bool FirestarterDebt { get; init; }
     public bool ManafontActiveThisFire { get; init; }
     public long ManafontUseSerial { get; init; }
-    public string CurrentPlanId { get; init; } = string.Empty;
     public BlmPhase LastObservedPhase { get; init; }
     public uint LastGcdId { get; init; }
     public long LastGcdAtMs { get; init; }
@@ -31,13 +40,13 @@ public sealed record BlmTrackerSnapshot
     public long LastAckGeneration { get; init; }
     public int AcknowledgedActionHistoryCount { get; init; }
     public int ZeroSequenceDedupeCount { get; init; }
+    public bool HasPendingIssuedAction { get; init; }
+    public uint PendingIssuedActionId { get; init; }
+    public long PendingIssuedActionDeadlineAtMs { get; init; }
     public bool PendingGaugeReconcile { get; init; }
     public uint LastGaugeReconciledActionId { get; init; }
     public long LastGaugeReconciledAtMs { get; init; }
     public string LastResetReason { get; init; } = "初始化";
-    public BlmIntent Transition { get; init; } = BlmIntent.Empty;
-    public BlmFollowUpIntent FollowUp { get; init; } = BlmFollowUpIntent.Empty;
-
     public bool ParadoxUsedThisFire => FirePhaseSerial > 0
         && ParadoxUsedFireSerial == FirePhaseSerial;
 
@@ -54,8 +63,6 @@ public readonly record struct BlmActionEffectAck(
     long ReceivedAtMs,
     BlmPhase PhaseBefore,
     long PhaseSerialBefore,
-    BlmTransitionAckToken TransitionToken,
-    BlmFollowUpAckToken FollowUpToken,
     long ObservedGcdStartedAtMs,
     float ObservedGcdRemainMs,
     bool HasHasteAtAck)
@@ -68,9 +75,7 @@ public readonly record struct BlmActionEffectAck(
         uint globalSequence,
         long receivedAtMs,
         BlmPhase phaseBefore,
-        long phaseSerialBefore,
-        BlmTransitionAckToken transitionToken,
-        BlmFollowUpAckToken followUpToken)
+        long phaseSerialBefore)
         : this(
             combatSerial,
             stateGeneration,
@@ -80,8 +85,6 @@ public readonly record struct BlmActionEffectAck(
             receivedAtMs,
             phaseBefore,
             phaseSerialBefore,
-            transitionToken,
-            followUpToken,
             0,
             0f,
             false)
@@ -96,9 +99,7 @@ public readonly record struct BlmActionEffectAck(
         out uint globalSequence,
         out long receivedAtMs,
         out BlmPhase phaseBefore,
-        out long phaseSerialBefore,
-        out BlmTransitionAckToken transitionToken,
-        out BlmFollowUpAckToken followUpToken)
+        out long phaseSerialBefore)
     {
         combatSerial = CombatSerial;
         stateGeneration = StateGeneration;
@@ -108,7 +109,5 @@ public readonly record struct BlmActionEffectAck(
         receivedAtMs = ReceivedAtMs;
         phaseBefore = PhaseBefore;
         phaseSerialBefore = PhaseSerialBefore;
-        transitionToken = TransitionToken;
-        followUpToken = FollowUpToken;
     }
 }

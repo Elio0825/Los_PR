@@ -45,7 +45,7 @@ public static class BlmSystemPanel
                 () => DrawAdaptivePair(
                     "system_live_debug_pair",
                     () => DrawRecentActions(debugSnapshot, scale),
-                    () => DrawStateMachines(snapshot, scale),
+                    () => DrawResolverRuntime(snapshot, scale),
                     scale),
                 "Decision、PAction 与服务器 ActionEffect 分层显示",
                 scale);
@@ -144,7 +144,7 @@ public static class BlmSystemPanel
                 BlmPanelPrimitives.DrawToggleRow(
                     "system_advanced_debug",
                     "高级调试",
-                    "显示实时决策、Ack、Gauge 与两套状态机。",
+                    "显示 Resolver 决策、通用 Pending、Ack 与 Gauge。",
                     settings.ShowAdvancedDebug,
                     value => store.Update(item => item.ShowAdvancedDebug = value),
                     scale,
@@ -234,7 +234,7 @@ public static class BlmSystemPanel
                     debug.WriterHealthy ? LosStatusTone.Success : LosStatusTone.Danger,
                     scale);
 
-                var decision = FindLast(debug, BlmDebugEventKind.Decision);
+                var decision = FindLast(debug, BlmDebugEventKind.ResolverFrame);
                 var dispatch = FindLast(debug, BlmDebugEventKind.DispatchReturned);
                 var ack = FindLast(debug, BlmDebugEventKind.AckAccepted);
                 var gauge = FindLast(debug, BlmDebugEventKind.GaugeReconciled);
@@ -284,70 +284,70 @@ public static class BlmSystemPanel
             scale: scale);
     }
 
-    private static void DrawStateMachines(BlmUiSnapshot snapshot, float scale)
+    private static void DrawResolverRuntime(BlmUiSnapshot snapshot, float scale)
     {
         LosCard.Draw(
-            "system_state_machines_card",
+            "system_resolver_runtime_card",
             () =>
             {
-                var transition = snapshot.Transition;
                 LosComponents.StatusPill(
-                    transition.IsActive ? "Transition 活动" : "Transition 空闲",
-                    TransitionTone(transition.Stage),
+                    "Resolver 生产模式",
+                    LosStatusTone.Success,
+                    scale);
+                ImGui.SameLine();
+                LosComponents.StatusPill(
+                    snapshot.HasPendingIssuedAction ? "等待 Ack" : "无 Pending",
+                    snapshot.HasPendingIssuedAction
+                        ? LosStatusTone.Warning
+                        : LosStatusTone.Neutral,
                     scale);
                 ImGui.Dummy(new Vector2(0f, 6f * scale));
                 LosComponents.KeyValueRow(
-                    "Transition",
-                    $"{transition.Kind} / {transition.Stage}",
+                    "决策核心",
+                    "Level 100 Resolver",
                     scale);
                 LosComponents.KeyValueRow(
-                    "步骤",
-                    $"#{transition.StepIndex} {transition.Step} / {transition.DeliveryChannel}",
+                    "通用 Pending",
+                    snapshot.HasPendingIssuedAction
+                        ? $"{BlmActionNames.Get(snapshot.PendingIssuedActionId)}"
+                            + $" ({snapshot.PendingIssuedActionId})"
+                        : "暂无",
                     scale);
                 LosComponents.KeyValueRow(
-                    "期望动作",
-                    transition.ExpectedActionId == 0
-                        ? "暂无"
-                        : $"{BlmActionNames.Get(transition.ExpectedActionId)} ({transition.ExpectedActionId})",
+                    "Pending 期限",
+                    FormatDeadline(
+                        snapshot.PendingIssuedActionDeadlineAtMs,
+                        snapshot.CapturedAtMs),
                     scale);
                 LosComponents.KeyValueRow(
-                    "步骤期限",
-                    $"{FormatDeadline(transition.ExpireAtMs, snapshot.CapturedAtMs)}"
-                        + $" / 总 {FormatDeadline(transition.TransitionExpireAtMs, snapshot.CapturedAtMs)}",
+                    "Gauge 对账",
+                    snapshot.PendingGaugeReconcile ? "等待下一 Tick" : "已同步",
                     scale);
                 LosComponents.KeyValueRow(
-                    "Transition 原因",
-                    EmptyAs(transition.Reason, "暂无"),
+                    "Generation",
+                    snapshot.StateGeneration.ToString(),
                     scale);
 
                 BlmPanelPrimitives.DrawDivider(scale);
-                var followUp = snapshot.FollowUp;
-                LosComponents.StatusPill(
-                    followUp.IsPending ? "Follow-up 活动" : "Follow-up 空闲",
-                    FollowUpTone(followUp.Stage),
-                    scale);
-                ImGui.Dummy(new Vector2(0f, 6f * scale));
                 LosComponents.KeyValueRow(
-                    "Follow-up",
-                    $"{followUp.Kind} / {followUp.Stage}",
+                    "历史可信",
+                    BoolLabel(snapshot.HistoryReliable),
                     scale);
                 LosComponents.KeyValueRow(
-                    "触发 -> 必须",
-                    $"{BlmActionNames.Get(followUp.TriggerActionId)}"
-                        + $" -> {BlmActionNames.Get(followUp.RequiredActionId)}",
+                    "Manafont Serial",
+                    snapshot.ManafontUseSerial.ToString(),
                     scale);
                 LosComponents.KeyValueRow(
-                    "阶段期限",
-                    $"{FormatDeadline(followUp.StageDeadlineAtMs, snapshot.CapturedAtMs)}"
-                        + $" / 总 {FormatDeadline(followUp.TotalExpireAtMs, snapshot.CapturedAtMs)}",
+                    "火四计数",
+                    $"本火段 {snapshot.Fire4Count} / 魔泉后 {snapshot.Fire4CountSinceManafont}",
                     scale);
                 LosComponents.KeyValueRow(
-                    "Follow-up 原因",
-                    EmptyAs(followUp.Reason, "暂无"),
+                    "最近重置",
+                    snapshot.LastResetReason,
                     scale);
             },
-            "Transition / Follow-up",
-            "当前 Tracker 投影；取消原因保留在事件表",
+            "Resolver 与回执",
+            "标准循环没有 Route/Step 状态图",
             height: 415f,
             scale: scale);
     }
@@ -420,7 +420,7 @@ public static class BlmSystemPanel
                 DrawEventTable(debug, scale);
             },
             "日志状态与最近事件",
-            "事件序列：Decision -> Dispatch -> ActionEffect Ack -> Gauge",
+            "事件序列：ResolverFrame -> Dispatch -> ActionEffect Ack -> Gauge",
             height: 540f,
             scale: scale);
     }
@@ -519,6 +519,7 @@ public static class BlmSystemPanel
             : $"{debugEvent.RuleId} | {EmptyAs(detail, "-")}";
         return debugEvent.Resources.MaxMp > 0
             && debugEvent.Kind is BlmDebugEventKind.Decision
+            or BlmDebugEventKind.ResolverFrame
             or BlmDebugEventKind.DispatchReturned
             or BlmDebugEventKind.ActionEffectObserved
             or BlmDebugEventKind.AckAccepted
@@ -533,15 +534,13 @@ public static class BlmSystemPanel
     private static string FormatKind(BlmDebugEventKind kind) => kind switch
     {
         BlmDebugEventKind.Decision => "Decision",
+        BlmDebugEventKind.ResolverFrame => "Resolver",
         BlmDebugEventKind.DispatchReturned => "Dispatch",
         BlmDebugEventKind.ActionEffectObserved => "Ack 观察",
         BlmDebugEventKind.AckAccepted => "Ack 接受",
         BlmDebugEventKind.AckRejected => "Ack 拒绝",
         BlmDebugEventKind.GaugeReconciled => "Gauge",
-        BlmDebugEventKind.TransitionChanged => "Transition",
-        BlmDebugEventKind.FollowUpChanged => "Follow-up",
         BlmDebugEventKind.Lifecycle => "生命周期",
-        BlmDebugEventKind.QueueCleared => "清理队列",
         BlmDebugEventKind.AckQueueDropped => "Ack 丢失",
         BlmDebugEventKind.LoggerDropped => "Logger 丢失",
         BlmDebugEventKind.LoggerError => "Logger 错误",
@@ -568,26 +567,6 @@ public static class BlmSystemPanel
             + $" P{resources.PolyglotStacks}/{resources.MaxPolyglot}"
             + $" | 悖论 {BoolLabel(resources.HasParadox)}"
             + $" 火苗 {BoolLabel(resources.HasFirestarter)}";
-
-    private static LosStatusTone TransitionTone(TransitionStage stage) => stage switch
-    {
-        TransitionStage.Cancelled => LosStatusTone.Danger,
-        TransitionStage.Completed or TransitionStage.Confirmed => LosStatusTone.Success,
-        TransitionStage.Requested or TransitionStage.Queued => LosStatusTone.Warning,
-        _ => LosStatusTone.Neutral,
-    };
-
-    private static LosStatusTone FollowUpTone(BlmFollowUpStage stage) => stage switch
-    {
-        BlmFollowUpStage.Cancelled => LosStatusTone.Danger,
-        BlmFollowUpStage.Completed or BlmFollowUpStage.RequiredAcknowledged
-            => LosStatusTone.Success,
-        BlmFollowUpStage.AwaitingTriggerAck
-            or BlmFollowUpStage.TriggerAcknowledged
-            or BlmFollowUpStage.Active
-            or BlmFollowUpStage.RequiredQueued => LosStatusTone.Warning,
-        _ => LosStatusTone.Neutral,
-    };
 
     private static string EmptyAs(string value, string fallback)
         => string.IsNullOrWhiteSpace(value) ? fallback : value;

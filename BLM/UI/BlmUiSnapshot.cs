@@ -58,16 +58,16 @@ public sealed record BlmUiSnapshot
     public uint LastAckActionId { get; init; }
     public uint LastAckSequence { get; init; }
     public long LastAckAtMs { get; init; }
+    public bool HasPendingIssuedAction { get; init; }
+    public uint PendingIssuedActionId { get; init; }
+    public long PendingIssuedActionDeadlineAtMs { get; init; }
     public bool PendingGaugeReconcile { get; init; }
     public uint LastGaugeReconciledActionId { get; init; }
     public long LastGaugeReconciledAtMs { get; init; }
     public string LastResetReason { get; init; } = "初始化";
-    public BlmIntent Transition { get; init; } = BlmIntent.Empty;
-    public BlmFollowUpIntent FollowUp { get; init; } = BlmFollowUpIntent.Empty;
-
     public bool IsFactLayerConnected => StateGeneration > 0;
     public bool IsDecisionEngineConnected => true;
-    public string DecisionStatus => "100级标准单体循环已接入";
+    public string DecisionStatus => "100级标准单体 Resolver 已接管生产入口";
 
     public string PhaseLabel => InAstralFire
         ? $"AF {AstralFireStacks}"
@@ -147,12 +147,13 @@ public sealed record BlmUiSnapshot
             LastAckActionId = tracker.LastAckActionId,
             LastAckSequence = tracker.LastAckGlobalSequence,
             LastAckAtMs = tracker.LastAckAtMs,
+            HasPendingIssuedAction = tracker.HasPendingIssuedAction,
+            PendingIssuedActionId = tracker.PendingIssuedActionId,
+            PendingIssuedActionDeadlineAtMs = tracker.PendingIssuedActionDeadlineAtMs,
             PendingGaugeReconcile = tracker.PendingGaugeReconcile,
             LastGaugeReconciledActionId = tracker.LastGaugeReconciledActionId,
             LastGaugeReconciledAtMs = tracker.LastGaugeReconciledAtMs,
             LastResetReason = tracker.LastResetReason,
-            Transition = tracker.Transition,
-            FollowUp = tracker.FollowUp,
         };
     }
 

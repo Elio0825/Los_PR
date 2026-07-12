@@ -194,6 +194,7 @@ public sealed record BlmDefensiveCastFacts
 
 public sealed record BlmResolverInput
 {
+    public long StateGeneration { get; init; }
     public BlmResolverContextFacts Context { get; init; } = new();
     public BlmResolverSettings Settings { get; init; } = BlmResolverSettings.Default;
     public ImmutableArray<BlmResolverActionFact> Actions { get; init; } = [];
@@ -213,6 +214,30 @@ public sealed record BlmResolverInput
     public BlmCasualCombatFacts CasualCombat { get; init; } = new();
     public BlmDefensiveCastFacts DefensiveCast { get; init; } = new();
     public bool IsPotionAvailable { get; init; }
+    public BlmResolverFactCoverage FactCoverage { get; init; } =
+        BlmResolverFactCoverage.Phase3A;
+}
+
+public sealed record BlmResolverFactCoverage
+{
+    public static BlmResolverFactCoverage Phase3A { get; } = new();
+
+    public bool CoreContextSupported { get; init; } = true;
+    public bool ActionAvailabilitySupported { get; init; } = true;
+    public bool TrackerHistorySupported { get; init; } = true;
+    public bool MainTargetDotSupported { get; init; } = true;
+    public bool ExactWeaveDeliveryChannelSupported { get; init; }
+    public bool CasualDutyAndAverageTtkSupported { get; init; }
+    public bool DefensiveCastSupported { get; init; }
+    public bool PotionSupported { get; init; }
+    public bool DotBlacklistSupported { get; init; }
+    public bool CompleteMultiTargetDotSupported { get; init; }
+    public bool GenerationConsistent { get; init; } = true;
+
+    public bool UsedWeavesApproximate => !ExactWeaveDeliveryChannelSupported;
+
+    public string UnsupportedSummary =>
+        "ExactWeaveChannel,CasualDutyAverageTtk,DefensiveCast,Potion,DotBlacklist,MultiTargetDot";
 }
 
 public sealed record BlmResolverCandidate

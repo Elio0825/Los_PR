@@ -1,3 +1,6 @@
+using LosPr.BLM.Resolvers;
+using LosPr.BLM.Resolvers.Production;
+
 namespace LosPr.BLM;
 
 public sealed class BlackMageEventHandler : IRotationEventHandler, IDisposable
@@ -5,22 +8,27 @@ public sealed class BlackMageEventHandler : IRotationEventHandler, IDisposable
     private const int MaxPendingAcks = 256;
 
     private readonly BlmStateTracker _tracker;
-    private readonly BlmActionDispatcher _dispatcher;
     private readonly IBlmClock _clock;
     private readonly IBlmDebugSink _debug;
+    private readonly BlmResolverInputAdapter _resolverInputAdapter;
+    private readonly BlmResolverExecutionService _execution;
     private readonly ConcurrentQueue<BlmActionEffectAck> _pendingAcks = new();
     private int _pendingAckCount;
+    private int _noTargetActive;
     private bool _disposed;
     private long _nextErrorLogAtMs;
 
     public BlackMageEventHandler(
         BlmStateTracker tracker,
-        BlmActionDispatcher dispatcher,
+        BlmResolverInputAdapter resolverInputAdapter,
+        BlmResolverExecutionService execution,
         IBlmClock? clock = null,
         IBlmDebugSink? debugSink = null)
     {
         _tracker = tracker ?? throw new ArgumentNullException(nameof(tracker));
-        _dispatcher = dispatcher ?? throw new ArgumentNullException(nameof(dispatcher));
+        _resolverInputAdapter = resolverInputAdapter
+            ?? throw new ArgumentNullException(nameof(resolverInputAdapter));
+        _execution = execution ?? throw new ArgumentNullException(nameof(execution));
         _clock = clock ?? SystemBlmClock.Instance;
         _debug = debugSink ?? NullBlmDebugSink.Instance;
         CombatEventManager.OnActionEffect += OnActionEffect;
@@ -59,10 +67,7 @@ public sealed class BlackMageEventHandler : IRotationEventHandler, IDisposable
                         : DescribeAckRejection(ack, before),
                     Detail = $"PhaseBefore={ack.PhaseBefore} / PhaseSerial={ack.PhaseSerialBefore}",
                     TargetEntityId = before.TargetEntityId,
-                    Transition = after.Tracker.Transition,
-                    FollowUp = after.Tracker.FollowUp,
                 });
-                TraceStateChanges(before, after, "FrameworkTick.ApplyAck", ack.ActionId);
             }
 
             var beforeGauge = _tracker.GetContextSnapshot();
@@ -70,7 +75,6 @@ public sealed class BlackMageEventHandler : IRotationEventHandler, IDisposable
             {
                 Tracker = beforeGauge.Tracker,
             };
-            _dispatcher.PrepareForReconcile(context);
             _tracker.Reconcile(context);
             var afterGauge = _tracker.GetContextSnapshot();
             if (afterGauge.Tracker.LastGaugeReconciledAtMs > 0
@@ -91,31 +95,51 @@ public sealed class BlackMageEventHandler : IRotationEventHandler, IDisposable
                     Reason = "ActionEffect 后的下一 Framework Tick Gauge 已对账。",
                     Detail = FormatResourceDelta(beforeGauge, afterGauge),
                     TargetEntityId = afterGauge.TargetEntityId,
-                    Transition = afterGauge.Tracker.Transition,
-                    FollowUp = afterGauge.Tracker.FollowUp,
                 });
             }
 
-            TraceStateChanges(
-                beforeGauge,
-                afterGauge,
-                "FrameworkTick.TrackerReconcile",
-                afterGauge.Tracker.LastGaugeReconciledActionId);
-            _dispatcher.Reconcile(
-                afterGauge,
-                HasHighPriorityAction());
-            var afterDispatcher = afterGauge with
+            var highPriorityQueueActive = HasHighPriorityAction();
+            var decisionFacts = _tracker.CaptureDecisionSnapshot();
+            var frameContext = afterGauge with
             {
-                Tracker = _tracker.GetTrackerSnapshot(),
+                Tracker = decisionFacts.Snapshot,
             };
-            TraceStateChanges(
-                afterGauge,
-                afterDispatcher,
-                "FrameworkTick.DispatcherReconcile");
+            TryBeginProductionFrame(
+                frameContext,
+                decisionFacts,
+                highPriorityQueueActive);
         }
         catch (Exception exception)
         {
+            _execution.InvalidateFrame();
             LogErrorThrottled(exception, "Framework Tick 状态对账失败");
+        }
+    }
+
+    private void TryBeginProductionFrame(
+        BlmContext context,
+        BlmTrackerDecisionSnapshot decisionFacts,
+        bool highPriorityQueueActive)
+    {
+        try
+        {
+            if (!_resolverInputAdapter.TryCapture(
+                    context,
+                    decisionFacts,
+                    highPriorityQueueActive,
+                    out var input,
+                    out _))
+            {
+                _execution.InvalidateFrame();
+                return;
+            }
+
+            BeginProductionFrame(context, input);
+        }
+        catch (Exception exception)
+        {
+            _execution.InvalidateFrame();
+            LogErrorThrottled(exception, "Resolver 生产决策帧构造失败");
         }
     }
 
@@ -128,6 +152,7 @@ public sealed class BlackMageEventHandler : IRotationEventHandler, IDisposable
         var before = _tracker.GetContextSnapshot();
         _tracker.BeginCombat();
         var after = _tracker.GetContextSnapshot();
+        _execution.InvalidateFrame();
         TraceLifecycle("BattleStarted", "战斗开始", before, after);
     }
 
@@ -138,7 +163,13 @@ public sealed class BlackMageEventHandler : IRotationEventHandler, IDisposable
     public void OnNoTarget()
     {
         var context = _tracker.GetContextSnapshot();
-        _dispatcher.CancelAll("目标失效", context);
+        _execution.InvalidateFrame();
+        _tracker.CancelIssuedAction();
+        if (Interlocked.Exchange(ref _noTargetActive, 1) != 0)
+        {
+            return;
+        }
+
         PublishDebug(new BlmDebugEventDraft
         {
             Kind = BlmDebugEventKind.Lifecycle,
@@ -146,10 +177,19 @@ public sealed class BlackMageEventHandler : IRotationEventHandler, IDisposable
             MonotonicMs = _clock.NowMs,
             EntryPoint = "NoTarget",
             Reason = "目标失效",
-            Detail = "已取消活动承诺；必要时清理 PR 普通队列。",
-            Transition = _tracker.GetTrackerSnapshot().Transition,
-            FollowUp = _tracker.GetTrackerSnapshot().FollowUp,
+            Detail = "已失效 Resolver 帧并清理未确认的通用 Pending。",
         });
+    }
+
+    private bool BeginProductionFrame(BlmContext context, BlmResolverInput input)
+    {
+        var started = _execution.BeginFrame(context, input);
+        if (started && context.HasValidTarget && context.TargetEntityId != 0)
+        {
+            Interlocked.Exchange(ref _noTargetActive, 0);
+        }
+
+        return started;
     }
 
     public void OnBattleEnded()
@@ -157,6 +197,7 @@ public sealed class BlackMageEventHandler : IRotationEventHandler, IDisposable
         var before = _tracker.GetContextSnapshot();
         _tracker.EndCombat();
         var after = _tracker.GetContextSnapshot();
+        _execution.InvalidateFrame();
         PromeSettings.Instance.OpenerHasBeenExecuted = false;
         TraceLifecycle("BattleEnded", "战斗结束", before, after);
     }
@@ -166,6 +207,7 @@ public sealed class BlackMageEventHandler : IRotationEventHandler, IDisposable
         var before = _tracker.GetContextSnapshot();
         _tracker.OnTerritoryChanged(territoryId);
         var after = _tracker.GetContextSnapshot();
+        _execution.InvalidateFrame();
         PromeSettings.Instance.OpenerHasBeenExecuted = false;
         TraceLifecycle(
             "TerritoryChanged",
@@ -191,6 +233,7 @@ public sealed class BlackMageEventHandler : IRotationEventHandler, IDisposable
             Reason = "事件处理器停止",
         });
         _disposed = true;
+        _execution.InvalidateFrame();
         CombatEventManager.OnActionEffect -= OnActionEffect;
         EventManager.OnPlayerDied -= OnPlayerDied;
         EventManager.OnPlayerRevived -= OnPlayerRevived;
@@ -253,8 +296,6 @@ public sealed class BlackMageEventHandler : IRotationEventHandler, IDisposable
                 Reason = "观察到自身 ActionEffect，已冻结 Ack Token。",
                 Detail = $"PhaseBefore={envelope.PhaseBefore} / PhaseSerial={envelope.PhaseSerialBefore}",
                 TargetEntityId = context.TargetEntityId,
-                Transition = context.Tracker.Transition,
-                FollowUp = context.Tracker.FollowUp,
             });
             _pendingAcks.Enqueue(envelope);
             var queued = Interlocked.Increment(ref _pendingAckCount);
@@ -272,8 +313,6 @@ public sealed class BlackMageEventHandler : IRotationEventHandler, IDisposable
                     DroppedCount = 1,
                     Reason = "Ack 队列超过 256，丢弃最旧事件并保留最新现场。",
                     TargetEntityId = context.TargetEntityId,
-                    Transition = context.Tracker.Transition,
-                    FollowUp = context.Tracker.FollowUp,
                 });
             }
         }
@@ -289,6 +328,7 @@ public sealed class BlackMageEventHandler : IRotationEventHandler, IDisposable
         {
             var before = _tracker.GetContextSnapshot();
             _tracker.OnPlayerDied();
+            _execution.InvalidateFrame();
             TraceLifecycle(
                 "PlayerDied",
                 "角色死亡",
@@ -307,6 +347,7 @@ public sealed class BlackMageEventHandler : IRotationEventHandler, IDisposable
         {
             var before = _tracker.GetContextSnapshot();
             _tracker.OnPlayerRevived();
+            _execution.InvalidateFrame();
             TraceLifecycle(
                 "PlayerRevived",
                 "角色复活",
@@ -391,61 +432,7 @@ public sealed class BlackMageEventHandler : IRotationEventHandler, IDisposable
             Reason = reason,
             Detail = detail,
             TargetEntityId = after.TargetEntityId,
-            Transition = after.Tracker.Transition,
-            FollowUp = after.Tracker.FollowUp,
         });
-        TraceStateChanges(before, after, entryPoint);
-    }
-
-    private void TraceStateChanges(
-        BlmContext before,
-        BlmContext after,
-        string entryPoint,
-        uint actionId = 0)
-    {
-        var transitionBefore = before.Tracker.Transition;
-        var transitionAfter = after.Tracker.Transition;
-        var followUpBefore = before.Tracker.FollowUp;
-        var followUpAfter = after.Tracker.FollowUp;
-        if (!Equals(transitionBefore, transitionAfter))
-        {
-            PublishDebug(new BlmDebugEventDraft
-            {
-                Kind = BlmDebugEventKind.TransitionChanged,
-                Context = after,
-                MonotonicMs = _clock.NowMs,
-                EntryPoint = entryPoint,
-                ActionId = actionId != 0 ? actionId : transitionAfter.ExpectedActionId,
-                Reason = transitionAfter.Reason,
-                Detail = $"{transitionBefore.Kind}/{transitionBefore.Step}/{transitionBefore.Stage}"
-                    + $" -> {transitionAfter.Kind}/{transitionAfter.Step}/{transitionAfter.Stage}",
-                TargetEntityId = after.TargetEntityId,
-                Transition = transitionAfter,
-                FollowUp = followUpAfter,
-            });
-        }
-
-        if (!Equals(followUpBefore, followUpAfter))
-        {
-            var expectedActionId = followUpAfter.Stage is BlmFollowUpStage.AwaitingTriggerAck
-                or BlmFollowUpStage.TriggerAcknowledged
-                ? followUpAfter.TriggerActionId
-                : followUpAfter.RequiredActionId;
-            PublishDebug(new BlmDebugEventDraft
-            {
-                Kind = BlmDebugEventKind.FollowUpChanged,
-                Context = after,
-                MonotonicMs = _clock.NowMs,
-                EntryPoint = entryPoint,
-                ActionId = actionId != 0 ? actionId : expectedActionId,
-                Reason = followUpAfter.Reason,
-                Detail = $"{followUpBefore.Kind}/{followUpBefore.Stage}"
-                    + $" -> {followUpAfter.Kind}/{followUpAfter.Stage}",
-                TargetEntityId = after.TargetEntityId,
-                Transition = transitionAfter,
-                FollowUp = followUpAfter,
-            });
-        }
     }
 
     private static string FormatResourceDelta(BlmContext before, BlmContext after)

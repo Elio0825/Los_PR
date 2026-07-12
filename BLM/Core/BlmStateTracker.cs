@@ -1,4 +1,4 @@
-using LosPr.BLM.Engine;
+using System.Collections.Immutable;
 
 namespace LosPr.BLM.Core;
 
@@ -6,14 +6,13 @@ public sealed class BlmStateTracker
 {
     private const int SeenSequenceCapacity = 4096;
     private const long ZeroSequenceDedupeWindowMs = 150;
+    public const long ManafontReconcileTimeoutMs = 1500;
     public const int AcknowledgedActionHistoryCapacity = 256;
     public const int ZeroSequenceDedupeCapacity = 256;
 
     private readonly object _gate = new();
     private readonly IBlmClock _clock;
     private readonly IBlmActionIdNormalizer _normalizer;
-    private readonly BlmCoordinator _coordinator;
-    private readonly BlmFollowUpCoordinator _followUp;
     private readonly HashSet<SequenceEventKey> _seenSequences = new();
     private readonly Queue<SequenceEventKey> _seenSequenceOrder = new();
     private readonly Dictionary<uint, ZeroSequenceEvent> _lastZeroSequenceByAction = new();
@@ -44,10 +43,8 @@ public sealed class BlmStateTracker
     private long _paradoxUsedIceSerial;
     private int _fire4Count;
     private int _fire4CountSinceManafont;
-    private bool _firestarterDebt;
     private bool _manafontActiveThisFire;
     private long _manafontUseSerial;
-    private string _currentPlanId = string.Empty;
     private uint _lastGcdId;
     private long _lastGcdAtMs;
     private long _lastGcdStartedAtMs;
@@ -67,16 +64,12 @@ public sealed class BlmStateTracker
     private long _zeroSequenceSerial;
 
     public BlmStateTracker(
-        BlmCoordinator coordinator,
         BlmContext initialContext,
         IBlmClock? clock = null,
-        IBlmActionIdNormalizer? normalizer = null,
-        BlmFollowUpCoordinator? followUp = null)
+        IBlmActionIdNormalizer? normalizer = null)
     {
-        _coordinator = coordinator ?? throw new ArgumentNullException(nameof(coordinator));
         _clock = clock ?? SystemBlmClock.Instance;
         _normalizer = normalizer ?? IdentityBlmActionIdNormalizer.Instance;
-        _followUp = followUp ?? new BlmFollowUpCoordinator(_clock);
         _latestContext = initialContext ?? throw new ArgumentNullException(nameof(initialContext));
         _stateGeneration = 1;
         _combatActive = initialContext.InCombat;
@@ -136,6 +129,41 @@ public sealed class BlmStateTracker
         }
     }
 
+    public BlmTrackerDecisionSnapshot CaptureDecisionSnapshot()
+    {
+        lock (_gate)
+        {
+            var history = ImmutableArray.CreateBuilder<BlmActionSuccess>(
+                _acknowledgedActionHistoryCount);
+            BlmActionSuccess? previousGcd = null;
+            for (var offset = 0; offset < _acknowledgedActionHistoryCount; offset++)
+            {
+                var index = (_acknowledgedActionHistoryStart + offset)
+                    % AcknowledgedActionHistoryCapacity;
+                var success = _acknowledgedActionHistory[index];
+                if (success.StateGeneration != _stateGeneration)
+                {
+                    continue;
+                }
+
+                history.Add(success);
+                if (success.IsGcd
+                    && (previousGcd is null
+                        || success.Serial > previousGcd.Value.Serial))
+                {
+                    previousGcd = success;
+                }
+            }
+
+            return new BlmTrackerDecisionSnapshot
+            {
+                Snapshot = BuildSnapshotNoLock(),
+                RecentHistory = history.MoveToImmutable(),
+                PreviousGcd = previousGcd,
+            };
+        }
+    }
+
     public bool TryRegisterIssuedAction(BlmIssuedActionMetadata metadata)
     {
         lock (_gate)
@@ -158,6 +186,14 @@ public sealed class BlmStateTracker
 
             _pendingIssuedAction = metadata;
             return true;
+        }
+    }
+
+    public void CancelIssuedAction()
+    {
+        lock (_gate)
+        {
+            _pendingIssuedAction = null;
         }
     }
 
@@ -205,8 +241,6 @@ public sealed class BlmStateTracker
                 receivedAtMs,
                 phaseBefore,
                 phaseSerial,
-                _coordinator.CaptureAckToken(_stateGeneration),
-                _followUp.CaptureAckToken(_stateGeneration, _combatSerial),
                 observedGcdStartedAtMs,
                 observedGcdRemainMs,
                 hasHasteAtAck);
@@ -236,45 +270,24 @@ public sealed class BlmStateTracker
             _lastAckAwaitingGauge = ack;
 
             var isKnownGcd = BlmSkillBook.IsKnownGcdAction(ack.ActionId, _normalizer);
-            var issuedMetadata = TakeMatchingIssuedActionNoLock(ack);
+            var isTrackedOgcd = !isKnownGcd && IsTrackedOgcd(ack.ActionId);
+            var issuedMetadata = TakeMatchingIssuedActionNoLock(
+                ack,
+                isKnownGcd,
+                isTrackedOgcd);
             RecordActionSuccessNoLock(ack, isKnownGcd, issuedMetadata);
-
-            var transitionActionMatches = ack.TransitionToken.IsValid
-                && (ack.ActionId == ack.TransitionToken.ExpectedActionId
-                    || ack.ActionId == ack.TransitionToken.ExpectedAdjustedActionId);
-            var transitionAcknowledged = false;
-            if (ack.TransitionToken.IsValid)
-            {
-                transitionAcknowledged = _coordinator.TryAcknowledge(
-                    ack.TransitionToken,
-                    ack.ActionId,
-                    ack.GlobalSequence,
-                    ack.ReceivedAtMs);
-            }
-
-            if (ack.FollowUpToken.IsValid)
-            {
-                _followUp.TryAcknowledge(
-                    ack.FollowUpToken,
-                    ack.ActionId,
-                    ack.GlobalSequence,
-                    ack.ReceivedAtMs);
-            }
 
             if (isKnownGcd)
             {
                 _lastGcdId = ack.ActionId;
                 _lastGcdAtMs = ack.ReceivedAtMs;
-                ApplyGcdFactsNoLock(ack, transitionAcknowledged);
+                ApplyGcdFactsNoLock(ack);
             }
             else if (IsTrackedOgcd(ack.ActionId))
             {
                 _lastOgcdId = ack.ActionId;
                 _lastOgcdAtMs = ack.ReceivedAtMs;
-                ApplyOgcdFactsNoLock(
-                    ack,
-                    transitionActionMatches,
-                    transitionAcknowledged);
+                ApplyOgcdFactsNoLock(ack);
             }
 
             RefreshLatestContextNoLock(_latestContext);
@@ -309,18 +322,7 @@ public sealed class BlmStateTracker
                 _lastAckAwaitingGauge = null;
             }
 
-            _coordinator.Reconcile(_stateGeneration, context);
-            _followUp.Reconcile(
-                _stateGeneration,
-                _combatSerial,
-                _firePhaseSerial,
-                context);
             ReconcileManafontNoLock(context);
-
-            if (_firestarterDebt && context.InIce && context.HasFirestarter)
-            {
-                _firestarterDebt = false;
-            }
 
             if (context.IsAvailable)
             {
@@ -400,20 +402,6 @@ public sealed class BlmStateTracker
             _combatActive = false;
             HardResetNoLock(_latestContext, $"区域切换至 {territoryId}");
             _historyReliable = false;
-            RefreshLatestContextNoLock(_latestContext);
-        }
-    }
-
-    public void MarkFirestarterDebt()
-    {
-        lock (_gate)
-        {
-            if (_disposed)
-            {
-                return;
-            }
-
-            _firestarterDebt = true;
             RefreshLatestContextNoLock(_latestContext);
         }
     }
@@ -528,8 +516,7 @@ public sealed class BlmStateTracker
 
         if (_combatActive
             && _lastObservedPhase != BlmPhase.Neutral
-            && context.Phase == BlmPhase.Neutral
-            && !_coordinator.Peek().IsActive)
+            && context.Phase == BlmPhase.Neutral)
         {
             HardResetNoLock(context, "战斗中元素状态异常归零");
             _historyReliable = false;
@@ -574,17 +561,13 @@ public sealed class BlmStateTracker
 
     private void HardResetNoLock(BlmContext context, string reason)
     {
-        _coordinator.CancelActive(reason);
-        _followUp.CancelActive(reason);
         _stateGeneration++;
         _fire4Count = 0;
         _fire4CountSinceManafont = 0;
         _paradoxUsedFireSerial = 0;
         _paradoxUsedIceSerial = 0;
-        _firestarterDebt = false;
         _manafontActiveThisFire = false;
         _manafontUseSerial = 0;
-        _currentPlanId = string.Empty;
         _lastGcdId = 0;
         _lastGcdAtMs = 0;
         _lastGcdStartedAtMs = 0;
@@ -629,7 +612,6 @@ public sealed class BlmStateTracker
             _fire4CountSinceManafont = 0;
             _manafontActiveThisFire = false;
             _pendingManafont = null;
-            _currentPlanId = string.Empty;
         }
 
         if (current == BlmPhase.Fire)
@@ -653,15 +635,8 @@ public sealed class BlmStateTracker
         }
     }
 
-    private void ApplyGcdFactsNoLock(
-        BlmActionEffectAck ack,
-        bool transitionAcknowledged)
+    private void ApplyGcdFactsNoLock(BlmActionEffectAck ack)
     {
-        if (transitionAcknowledged && IsFirestarterDebtConsumptionStep(ack))
-        {
-            _firestarterDebt = true;
-        }
-
         if (BlmSkillBook.ActionIdsMatch(BLMSkill.炽炎, ack.ActionId, _normalizer)
             && ack.PhaseBefore == BlmPhase.Fire
             && ack.PhaseSerialBefore == _firePhaseSerial)
@@ -692,46 +667,11 @@ public sealed class BlmStateTracker
         }
     }
 
-    private bool IsFirestarterDebtConsumptionStep(BlmActionEffectAck ack)
-    {
-        if (!BlmSkillBook.ActionIdsMatch(BLMSkill.爆炎, ack.ActionId, _normalizer)
-            || !ack.TransitionToken.IsValid)
-        {
-            return false;
-        }
-
-        var intent = _coordinator.Peek();
-        return intent.StateGeneration == ack.TransitionToken.StateGeneration
-            && intent.Serial == ack.TransitionToken.Serial
-            && intent.StepIndex == ack.TransitionToken.StepIndex
-            && intent.Kind == TransitionKind.IceToFire
-            && intent.IceToFireRoute == IceToFireRoute.Af1ParadoxRecovery
-            && intent.Step == TransitionStep.UseFirestarterF3;
-    }
-
-    private void ApplyOgcdFactsNoLock(
-        BlmActionEffectAck ack,
-        bool transitionActionMatches,
-        bool transitionAcknowledged)
+    private void ApplyOgcdFactsNoLock(BlmActionEffectAck ack)
     {
         if (!BlmSkillBook.ActionIdsMatch(BLMSkill.魔泉, ack.ActionId, _normalizer))
         {
             return;
-        }
-
-        if (ack.TransitionToken.IsValid
-            && transitionActionMatches
-            && !transitionAcknowledged)
-        {
-            return;
-        }
-
-        var pendingToken = transitionAcknowledged
-            ? ack.TransitionToken
-            : default;
-        if (!pendingToken.IsValid && _coordinator.Peek().IsActive)
-        {
-            _coordinator.CancelActive("Unexpected Manafont ActionEffect");
         }
 
         _pendingManafont = new PendingManafontSync(
@@ -740,10 +680,9 @@ public sealed class BlmStateTracker
             ack.ActionId,
             ack.GlobalSequence,
             ack.ReceivedAtMs,
-            ack.ReceivedAtMs + BlmCoordinator.PostAckReconcileTimeoutMs,
+            ack.ReceivedAtMs + ManafontReconcileTimeoutMs,
             ack.PhaseBefore,
-            ack.PhaseSerialBefore,
-            pendingToken);
+            ack.PhaseSerialBefore);
     }
 
     private void ReconcileManafontNoLock(BlmContext context)
@@ -768,18 +707,6 @@ public sealed class BlmStateTracker
         if (!context.HasManafontResourcesRestored)
         {
             return;
-        }
-
-        if (pending.TransitionToken.IsValid)
-        {
-            var intent = _coordinator.Peek();
-            if (intent.StateGeneration != _stateGeneration
-                || intent.Serial != pending.TransitionToken.Serial
-                || intent.StepIndex != pending.TransitionToken.StepIndex
-                || intent.Stage != TransitionStage.Confirmed)
-            {
-                return;
-            }
         }
 
         _manafontActiveThisFire = true;
@@ -853,7 +780,9 @@ public sealed class BlmStateTracker
     }
 
     private BlmIssuedActionMetadata? TakeMatchingIssuedActionNoLock(
-        BlmActionEffectAck ack)
+        BlmActionEffectAck ack,
+        bool isKnownGcd,
+        bool isTrackedOgcd)
     {
         if (_pendingIssuedAction is not { } pending)
         {
@@ -867,23 +796,36 @@ public sealed class BlmStateTracker
             return null;
         }
 
-        if (ack.ActionId != pending.RequestedId
-            && ack.ActionId != pending.AdjustedAtIssue)
-        {
-            return null;
-        }
-
-        if (ack.ReceivedAtMs < pending.IssuedAtMs
-            || (ack.GlobalSequence != 0
-                && !IsSequenceNewer(
+        var isNewerThanPending = ack.ReceivedAtMs >= pending.IssuedAtMs
+            && (ack.GlobalSequence == 0
+                || IsSequenceNewer(
                     ack.GlobalSequence,
-                    pending.AckSequenceBaseline)))
+                    pending.AckSequenceBaseline));
+        if (!isNewerThanPending)
         {
             return null;
         }
 
-        _pendingIssuedAction = null;
-        return pending;
+        var actionMatches = ack.ActionId == pending.RequestedId
+            || ack.ActionId == pending.AdjustedAtIssue;
+        var gcdStartedBeforeIssue = isKnownGcd
+            && ack.ObservedGcdStartedAtMs > 0
+            && ack.ObservedGcdStartedAtMs < pending.IssuedAtMs;
+        if (actionMatches && !gcdStartedBeforeIssue)
+        {
+            _pendingIssuedAction = null;
+            return pending;
+        }
+
+        var newGcdSupersedesPending = isKnownGcd
+            && ack.ObservedGcdStartedAtMs >= pending.IssuedAtMs;
+        var sameChannelOgcdSupersedesPending = isTrackedOgcd && !pending.IsGcd;
+        if (newGcdSupersedesPending || sameChannelOgcdSupersedesPending)
+        {
+            _pendingIssuedAction = null;
+        }
+
+        return null;
     }
 
     private void ExpireIssuedActionNoLock(long nowMs)
@@ -1065,10 +1007,8 @@ public sealed class BlmStateTracker
         ParadoxUsedIceSerial = _paradoxUsedIceSerial,
         Fire4Count = _fire4Count,
         Fire4CountSinceManafont = _fire4CountSinceManafont,
-        FirestarterDebt = _firestarterDebt,
         ManafontActiveThisFire = _manafontActiveThisFire,
         ManafontUseSerial = _manafontUseSerial,
-        CurrentPlanId = _currentPlanId,
         LastObservedPhase = _lastObservedPhase,
         LastGcdId = _lastGcdId,
         LastGcdAtMs = _lastGcdAtMs,
@@ -1082,14 +1022,14 @@ public sealed class BlmStateTracker
         LastAckGeneration = _lastAckGeneration,
         AcknowledgedActionHistoryCount = _acknowledgedActionHistoryCount,
         ZeroSequenceDedupeCount = _lastZeroSequenceByAction.Count,
+        HasPendingIssuedAction = _pendingIssuedAction is not null,
+        PendingIssuedActionId = _pendingIssuedAction?.AdjustedAtIssue ?? 0,
+        PendingIssuedActionDeadlineAtMs = _pendingIssuedAction?.DeadlineAtMs ?? 0,
         PendingGaugeReconcile = _lastAckAwaitingGauge is not null
-            || _pendingManafont is not null
-            || _coordinator.Peek() is { Stage: TransitionStage.Queued, HasExpectedAck: true },
+            || _pendingManafont is not null,
         LastGaugeReconciledActionId = _lastGaugeReconciledActionId,
         LastGaugeReconciledAtMs = _lastGaugeReconciledAtMs,
         LastResetReason = _lastResetReason,
-        Transition = _coordinator.Peek(),
-        FollowUp = _followUp.Peek(),
     };
 
     private void RefreshLatestContextNoLock(BlmContext context)
@@ -1120,6 +1060,5 @@ public sealed class BlmStateTracker
         long AcknowledgedAtMs,
         long DeadlineMs,
         BlmPhase PhaseBefore,
-        long PhaseSerialBefore,
-        BlmTransitionAckToken TransitionToken);
+        long PhaseSerialBefore);
 }

@@ -13,7 +13,6 @@ global using Dalamud.Game.ClientState.Objects.Types;
 global using ECommons.DalamudServices;
 global using LosPr.BLM.Data;
 global using LosPr.BLM.Core;
-global using LosPr.BLM.Engine;
 global using LosPr.BLM.Diagnostics;
 global using PromeRotation.Data;
 global using PromeRotation.Extensions;

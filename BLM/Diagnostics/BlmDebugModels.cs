@@ -1,5 +1,6 @@
 using System.Collections.ObjectModel;
 using System.Text.RegularExpressions;
+using LosPr.BLM.Resolvers;
 
 namespace LosPr.BLM.Diagnostics;
 
@@ -11,13 +12,53 @@ public enum BlmDebugEventKind
     AckAccepted,
     AckRejected,
     GaugeReconciled,
-    TransitionChanged,
-    FollowUpChanged,
     Lifecycle,
-    QueueCleared,
     AckQueueDropped,
     LoggerDropped,
     LoggerError,
+    ResolverFrame,
+}
+
+public sealed record BlmDebugResolverSnapshot
+{
+    public long FrameSequence { get; init; }
+    public long FrameCapturedAtMs { get; init; }
+    public long FrameStateGeneration { get; init; }
+    public BlmResolverChannel Channel { get; init; }
+    public uint CandidateActionId { get; init; }
+    public uint DeliverableActionId { get; init; }
+    public string TargetKey { get; init; } = string.Empty;
+    public BlmResolverTargetKind TargetKind { get; init; }
+    public string ResolverId { get; init; } = string.Empty;
+    public int CheckCode { get; init; }
+    public bool HoldGcdForTranspose { get; init; }
+    public bool GcdBlockedByTransposeHold { get; init; }
+    public bool DeliveryBlocked { get; init; }
+    public string BlockReason { get; init; } = string.Empty;
+    public bool HighPriorityQueueActive { get; init; }
+    public int RemainingWeaves { get; init; }
+    public string FactCoverage { get; init; } = string.Empty;
+}
+
+public sealed record BlmDebugResolverDraft
+{
+    public long FrameSequence { get; init; }
+    public long FrameCapturedAtMs { get; init; }
+    public long FrameStateGeneration { get; init; }
+    public BlmResolverChannel Channel { get; init; }
+    public uint CandidateActionId { get; init; }
+    public uint DeliverableActionId { get; init; }
+    public uint TargetEntityId { get; init; }
+    public BlmResolverTargetKind TargetKind { get; init; }
+    public string ResolverId { get; init; } = string.Empty;
+    public int CheckCode { get; init; }
+    public bool HoldGcdForTranspose { get; init; }
+    public bool GcdBlockedByTransposeHold { get; init; }
+    public bool DeliveryBlocked { get; init; }
+    public string BlockReason { get; init; } = string.Empty;
+    public bool HighPriorityQueueActive { get; init; }
+    public int RemainingWeaves { get; init; }
+    public string FactCoverage { get; init; } = string.Empty;
 }
 
 public sealed record BlmDebugResourceSnapshot
@@ -82,83 +123,9 @@ public sealed record BlmDebugResourceSnapshot
     }
 }
 
-public sealed record BlmDebugTransitionSnapshot
-{
-    public TransitionKind Kind { get; init; }
-    public TransitionStep Step { get; init; }
-    public TransitionStage Stage { get; init; }
-    public TransitionDeliveryChannel DeliveryChannel { get; init; }
-    public long Serial { get; init; }
-    public int StepIndex { get; init; }
-    public uint ExpectedActionId { get; init; }
-    public string ExpectedActionName { get; init; } = string.Empty;
-    public uint AcknowledgedActionId { get; init; }
-    public uint AcknowledgedGlobalSequence { get; init; }
-    public long StepDeadlineAtMs { get; init; }
-    public long TotalDeadlineAtMs { get; init; }
-    public string Reason { get; init; } = string.Empty;
-
-    public static BlmDebugTransitionSnapshot FromIntent(BlmIntent? intent)
-    {
-        intent ??= BlmIntent.Empty;
-        return new BlmDebugTransitionSnapshot
-        {
-            Kind = intent.Kind,
-            Step = intent.Step,
-            Stage = intent.Stage,
-            DeliveryChannel = intent.DeliveryChannel,
-            Serial = intent.Serial,
-            StepIndex = intent.StepIndex,
-            ExpectedActionId = intent.ExpectedActionId,
-            ExpectedActionName = BlmActionNames.Get(intent.ExpectedActionId),
-            AcknowledgedActionId = intent.AcknowledgedActionId,
-            AcknowledgedGlobalSequence = intent.AcknowledgedGlobalSequence,
-            StepDeadlineAtMs = intent.ExpireAtMs,
-            TotalDeadlineAtMs = intent.TransitionExpireAtMs,
-            Reason = BlmDebugText.Clean(intent.Reason),
-        };
-    }
-}
-
-public sealed record BlmDebugFollowUpSnapshot
-{
-    public BlmFollowUpKind Kind { get; init; }
-    public BlmFollowUpStage Stage { get; init; }
-    public long Serial { get; init; }
-    public uint TriggerActionId { get; init; }
-    public string TriggerActionName { get; init; } = string.Empty;
-    public uint RequiredActionId { get; init; }
-    public string RequiredActionName { get; init; } = string.Empty;
-    public uint TriggerAckGlobalSequence { get; init; }
-    public uint RequiredAckGlobalSequence { get; init; }
-    public long StageDeadlineAtMs { get; init; }
-    public long TotalDeadlineAtMs { get; init; }
-    public string Reason { get; init; } = string.Empty;
-
-    public static BlmDebugFollowUpSnapshot FromIntent(BlmFollowUpIntent? intent)
-    {
-        intent ??= BlmFollowUpIntent.Empty;
-        return new BlmDebugFollowUpSnapshot
-        {
-            Kind = intent.Kind,
-            Stage = intent.Stage,
-            Serial = intent.Serial,
-            TriggerActionId = intent.TriggerActionId,
-            TriggerActionName = BlmActionNames.Get(intent.TriggerActionId),
-            RequiredActionId = intent.RequiredActionId,
-            RequiredActionName = BlmActionNames.Get(intent.RequiredActionId),
-            TriggerAckGlobalSequence = intent.TriggerAckGlobalSequence,
-            RequiredAckGlobalSequence = intent.RequiredAckGlobalSequence,
-            StageDeadlineAtMs = intent.StageDeadlineAtMs,
-            TotalDeadlineAtMs = intent.TotalExpireAtMs,
-            Reason = BlmDebugText.Clean(intent.Reason),
-        };
-    }
-}
-
 public sealed record BlmDebugEvent
 {
-    public const int CurrentSchemaVersion = 1;
+    public const int CurrentSchemaVersion = 2;
 
     public int SchemaVersion { get; init; } = CurrentSchemaVersion;
     public long EventSequence { get; init; }
@@ -183,8 +150,7 @@ public sealed record BlmDebugEvent
     public long IcePhaseSerial { get; init; }
     public long DroppedCount { get; init; }
     public BlmDebugResourceSnapshot Resources { get; init; } = new();
-    public BlmDebugTransitionSnapshot Transition { get; init; } = new();
-    public BlmDebugFollowUpSnapshot FollowUp { get; init; } = new();
+    public BlmDebugResolverSnapshot? Resolver { get; init; }
 }
 
 public sealed record BlmDebugEventDraft
@@ -203,8 +169,7 @@ public sealed record BlmDebugEventDraft
     public string Detail { get; init; } = string.Empty;
     public uint TargetEntityId { get; init; }
     public long DroppedCount { get; init; }
-    public BlmIntent? Transition { get; init; }
-    public BlmFollowUpIntent? FollowUp { get; init; }
+    public BlmDebugResolverDraft? Resolver { get; init; }
 }
 
 public sealed record BlmDebugSnapshot

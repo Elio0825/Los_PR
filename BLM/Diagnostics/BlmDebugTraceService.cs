@@ -230,8 +230,6 @@ public sealed class BlmDebugTraceService : IBlmDebugSink, IBlmDebugViewSource, I
     {
         var context = draft.Context ?? BlmContext.Unavailable;
         var tracker = context.Tracker ?? BlmTrackerSnapshot.Empty;
-        var transition = draft.Transition ?? tracker.Transition;
-        var followUp = draft.FollowUp ?? tracker.FollowUp;
         var monotonicMs = draft.MonotonicMs > 0
             ? draft.MonotonicMs
             : context.CapturedAtMs;
@@ -259,30 +257,74 @@ public sealed class BlmDebugTraceService : IBlmDebugSink, IBlmDebugViewSource, I
             IcePhaseSerial = tracker.IcePhaseSerial,
             DroppedCount = draft.DroppedCount,
             Resources = BlmDebugResourceSnapshot.FromContext(context),
-            Transition = BlmDebugTransitionSnapshot.FromIntent(transition),
-            FollowUp = BlmDebugFollowUpSnapshot.FromIntent(followUp),
+            Resolver = FreezeResolver(draft.Resolver),
+        };
+    }
+
+    private BlmDebugResolverSnapshot? FreezeResolver(BlmDebugResolverDraft? draft)
+    {
+        if (draft is null)
+        {
+            return null;
+        }
+
+        return new BlmDebugResolverSnapshot
+        {
+            FrameSequence = draft.FrameSequence,
+            FrameCapturedAtMs = draft.FrameCapturedAtMs,
+            FrameStateGeneration = draft.FrameStateGeneration,
+            Channel = draft.Channel,
+            CandidateActionId = draft.CandidateActionId,
+            DeliverableActionId = draft.DeliverableActionId,
+            TargetKey = ResolveTargetKey(draft.TargetEntityId),
+            TargetKind = draft.TargetKind,
+            ResolverId = BlmDebugText.Clean(draft.ResolverId),
+            CheckCode = draft.CheckCode,
+            HoldGcdForTranspose = draft.HoldGcdForTranspose,
+            GcdBlockedByTransposeHold = draft.GcdBlockedByTransposeHold,
+            DeliveryBlocked = draft.DeliveryBlocked,
+            BlockReason = BlmDebugText.Clean(draft.BlockReason),
+            HighPriorityQueueActive = draft.HighPriorityQueueActive,
+            RemainingWeaves = draft.RemainingWeaves,
+            FactCoverage = BlmDebugText.Clean(draft.FactCoverage),
         };
     }
 
     private bool ShouldDedupe(BlmDebugEvent debugEvent)
     {
-        if (debugEvent.Kind != BlmDebugEventKind.Decision)
+        if (debugEvent.Kind is not BlmDebugEventKind.Decision
+            and not BlmDebugEventKind.ResolverFrame)
         {
             return false;
         }
 
         var entryPoint = debugEvent.EntryPoint;
-        var fingerprint = string.Join(
-            '|',
-            debugEvent.ActionId,
-            debugEvent.RuleId,
-            debugEvent.Reason,
-            debugEvent.StateGeneration,
-            debugEvent.Transition.Serial,
-            debugEvent.Transition.StepIndex,
-            debugEvent.Transition.Stage,
-            debugEvent.FollowUp.Serial,
-            debugEvent.FollowUp.Stage);
+        var resolver = debugEvent.Resolver;
+        var fingerprint = debugEvent.Kind == BlmDebugEventKind.ResolverFrame
+            && resolver is not null
+            ? string.Join(
+                '|',
+                debugEvent.StateGeneration,
+                resolver.Channel,
+                resolver.CandidateActionId,
+                resolver.DeliverableActionId,
+                resolver.TargetKey,
+                resolver.TargetKind,
+                resolver.ResolverId,
+                resolver.CheckCode,
+                resolver.HoldGcdForTranspose,
+                resolver.GcdBlockedByTransposeHold,
+                resolver.DeliveryBlocked,
+                resolver.BlockReason,
+                resolver.HighPriorityQueueActive,
+                resolver.RemainingWeaves,
+                resolver.FactCoverage)
+            : string.Join(
+                '|',
+                debugEvent.ActionId,
+                debugEvent.RuleId,
+                debugEvent.Reason,
+                debugEvent.StateGeneration);
         var duplicate = _decisionDedupe.TryGetValue(entryPoint, out var previous)
             && string.Equals(fingerprint, previous.Fingerprint, StringComparison.Ordinal)
             && debugEvent.MonotonicMs >= previous.AtMs

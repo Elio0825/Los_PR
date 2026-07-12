@@ -414,6 +414,9 @@ internal static class Level100SingleTargetResolvers
         return Gcd(input, actionId, 1);
     }
 
+    internal static bool HasAvailableInstantGcd(BlmResolverInput input)
+        => SelectAvailableInstantGcd(input) != 0;
+
     private static uint SelectAvailableInstantGcd(BlmResolverInput input)
     {
         var context = input.Context;

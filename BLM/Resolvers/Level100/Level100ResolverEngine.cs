@@ -71,6 +71,12 @@ public static class Level100ResolverEngine
 
     public static bool BehaviorClosureImplemented => true;
 
+    public static bool HasAvailableInstantGcd(BlmResolverInput input)
+    {
+        ArgumentNullException.ThrowIfNull(input);
+        return Level100SingleTargetResolvers.HasAvailableInstantGcd(input);
+    }
+
     public static BlmDecisionFrame Evaluate(BlmResolverInput input)
     {
         ArgumentNullException.ThrowIfNull(input);

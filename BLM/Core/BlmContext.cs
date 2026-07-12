@@ -52,6 +52,7 @@ public sealed record BlmContext
     public bool InCombat { get; init; }
     public bool IsAlive { get; init; }
     public bool IsCasting { get; init; }
+    public uint CurrentCastingActionId { get; init; }
     public bool CanAct { get; init; }
 
     public int ActionQueueWindowMs { get; init; } =
@@ -91,6 +92,7 @@ public sealed record BlmContext
     public int TriplecastStacks { get; init; }
     public float TriplecastRemainSeconds { get; init; }
     public bool HasLeyLines { get; init; }
+    public bool HasLeyLinesStatus737 { get; init; }
     public bool HasLeyLinesHaste { get; init; }
     public BlmActionAvailability Transpose { get; init; } = new();
     public BlmActionAvailability Swiftcast { get; init; } = new();
@@ -112,7 +114,10 @@ public sealed record BlmContext
     public bool DotEnabled { get; init; }
     public bool MoveXenoEnabled { get; init; }
     public bool MoveTriplecastEnabled { get; init; }
-    public bool ExperimentalB4TransposeDespairEnabled { get; init; }
+    public bool ManafontEnabled { get; init; }
+    public bool DumpPolyglotEnabled { get; init; }
+    public bool FastFlareStarEnabled { get; init; }
+    public bool SkipIceParadox { get; init; }
 
     public bool InFire => Phase == BlmPhase.Fire;
     public bool InIce => Phase == BlmPhase.Ice;
@@ -134,16 +139,13 @@ public sealed record BlmContext
     public bool ManafontReady => Manafont.IsReady;
     public float SingleTargetDotRemainMs => SingleTargetDot.RemainingMs;
     public float AoeDotRemainMs => AoeDot.RemainingMs;
-    public RotationMode Mode => IsAoeMode
-        ? EnemyCount >= 3 ? RotationMode.ThreePlusAoe : RotationMode.TwoTargetAoe
-        : RotationMode.SingleTarget;
-    public float DotRemainMs => Mode == RotationMode.SingleTarget
+    public float DotRemainMs => !IsAoeMode
         ? SingleTargetDot.RemainingMs
         : AoeDot.RemainingMs;
-    public bool DotExpiring => Mode == RotationMode.SingleTarget
+    public bool DotExpiring => !IsAoeMode
         ? SingleTargetDot.IsExpiring
         : AoeDot.IsExpiring;
-    public bool DotMissing => Mode == RotationMode.SingleTarget
+    public bool DotMissing => !IsAoeMode
         ? SingleTargetDot.IsMissing
         : AoeDot.IsMissing;
     public float RequiredInstantB3ReserveSeconds => Math.Max(GcdTotalSeconds, 2.5f) + 0.75f;
@@ -201,6 +203,7 @@ public sealed record BlmContext
             var smartAoeEnabled = ReadQt("智能AOE");
             var isAoeMode = aoeEnabled
                 && (smartAoeEnabled ? enemyCount >= 2 : enemyCount >= 3);
+            var hasLeyLinesStatus737 = me.HasStatus(BlmBuff.黑魔纹);
             var hasLeyLinesHaste = me.HasStatus(BlmBuff.咏速);
 
             return new BlmContext
@@ -219,6 +222,7 @@ public sealed record BlmContext
                 InCombat = PRGameData.IsInCombat(),
                 IsAlive = !me.IsDead && me.CurrentHp > 0,
                 IsCasting = me.IsCasting,
+                CurrentCastingActionId = me.IsCasting ? me.CastActionId : 0,
                 CanAct = !me.IsDead && me.CurrentHp > 0 && !PRGameData.IsPlayerOccupied(),
                 ActionQueueWindowMs = ReadActionQueueWindowMs(),
                 GcdTotalSeconds = Math.Max(0f, ActionHelper.GetGcdTotal()),
@@ -252,7 +256,8 @@ public sealed record BlmContext
                 SwiftcastRemainSeconds = GetSelfStatusRemainingSeconds(me, BlmBuff.即刻),
                 TriplecastStacks = GetSelfStatusStacks(me, BlmBuff.三连),
                 TriplecastRemainSeconds = GetSelfStatusRemainingSeconds(me, BlmBuff.三连),
-                HasLeyLines = me.HasStatus(BlmBuff.黑魔纹) || hasLeyLinesHaste,
+                HasLeyLines = hasLeyLinesStatus737 || hasLeyLinesHaste,
+                HasLeyLinesStatus737 = hasLeyLinesStatus737,
                 HasLeyLinesHaste = hasLeyLinesHaste,
                 Transpose = CaptureAction(BLMSkill.星灵移位, level),
                 Swiftcast = CaptureAction(MageUniversalSkill.即刻咏唱, level),
@@ -273,7 +278,10 @@ public sealed record BlmContext
                 DotEnabled = ReadQt("Dot"),
                 MoveXenoEnabled = ReadQt("移动通晓"),
                 MoveTriplecastEnabled = ReadQt("移动三连"),
-                ExperimentalB4TransposeDespairEnabled = ReadQt("实验_B4星灵绝望"),
+                ManafontEnabled = ReadQt("魔泉"),
+                DumpPolyglotEnabled = ReadQt("倾泻资源"),
+                FastFlareStarEnabled = ReadQt("快速耀星"),
+                SkipIceParadox = ReadQt("不打冰悖论"),
             };
         }
         catch (Exception exception)

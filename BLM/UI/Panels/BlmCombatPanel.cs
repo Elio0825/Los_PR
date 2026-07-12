@@ -37,45 +37,33 @@ public static class BlmCombatPanel
         LosSection.Draw(
             "combat_advanced",
             "进阶路线",
-            () => LosCard.Draw(
-                "combat_paradox",
-                () => DrawGroup(
-                    ["压缩火悖论", "即刻进冰", "三连进冰", "黑魔纹", "详述"],
-                    "combat_paradox_group",
-                    store,
-                    scale,
-                    reduceMotion),
-                "单体能力策略",
-                "悖论位置、转冰瞬发与常规能力技",
-                height: 445f,
-                scale: scale),
-            scale: scale);
-
-        LosSection.Draw(
-            "combat_experimental",
-            "危险区",
-            () => LosCard.Draw(
-                "combat_experimental_card",
-                () =>
-                {
-                    LosComponents.StatusPill("实验功能", LosStatusTone.Danger, scale);
-                    ImGui.SameLine();
-                    LosComponents.StatusPill("默认关闭", LosStatusTone.Warning, scale);
-                    ImGui.Dummy(new Vector2(0f, 8f * scale));
-                    BlmPanelPrimitives.DrawMuted(
-                        "实验路线可能改变标准资源规划。它与稳定路线隔离，未主动开启时不会参与决策。\n");
-                    BlmPanelPrimitives.DrawDivider(scale);
-                    BlmPanelPrimitives.DrawQtToggle(
-                        "combat_experimental_b4",
-                        "实验_B4星灵绝望",
+            () => DrawAdaptivePair(
+                "combat_advanced_pair",
+                () => LosCard.Draw(
+                    "combat_resource_policy",
+                    () => DrawGroup(
+                        ["压缩火悖论", "不打冰悖论", "倾泻资源", "快速耀星"],
+                        "combat_resource",
                         store,
                         scale,
-                        reduceMotion);
-                },
-                "B4 星灵绝望",
-                "不随任何预设自动开启",
-                height: 235f,
-                scale: scale),
+                        reduceMotion),
+                    "循环资源策略",
+                    "悖论位置、通晓消耗与耀星节奏",
+                    height: 370f,
+                    scale: scale),
+                () => LosCard.Draw(
+                    "combat_ability_policy",
+                    () => DrawGroup(
+                        ["即刻进冰", "三连进冰", "黑魔纹", "详述", "魔泉"],
+                        "combat_ability",
+                        store,
+                        scale,
+                        reduceMotion),
+                    "能力技策略",
+                    "转冰保障、能力窗口与魔泉续火",
+                    height: 445f,
+                    scale: scale),
+                scale),
             scale: scale);
     }
 

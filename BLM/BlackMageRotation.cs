@@ -1,3 +1,6 @@
+using LosPr.BLM.Resolvers;
+using LosPr.BLM.Resolvers.Production;
+
 namespace LosPr.BLM;
 
 [RotationMetadata(25u, "Los 黑魔智能循环", "Los", "0.1.0")]
@@ -17,7 +20,10 @@ public sealed class BlackMageRotation : IRotation, IRotationMeta, IDisposable
             ["三连进冰"] = true,
             ["黑魔纹"] = true,
             ["详述"] = true,
-            ["实验_B4星灵绝望"] = false,
+            ["魔泉"] = true,
+            ["倾泻资源"] = false,
+            ["快速耀星"] = false,
+            ["不打冰悖论"] = false,
         };
 
     public static IReadOnlyDictionary<string, Type> Openers { get; } =
@@ -25,10 +31,9 @@ public sealed class BlackMageRotation : IRotation, IRotationMeta, IDisposable
 
     private readonly BlackMageSettingsStore _settingsStore;
     private readonly BlmDebugTraceService _debugTrace;
-    private readonly BlmCoordinator _coordinator;
-    private readonly BlmFollowUpCoordinator _followUp;
     private readonly BlmStateTracker _tracker;
-    private readonly BlmActionDispatcher _dispatcher;
+    private readonly BlmResolverInputAdapter _resolverInputAdapter;
+    private readonly BlmResolverExecutionService _execution;
     private readonly LosPr.BLM.UI.BlmConsoleWindow _consoleWindow;
     private readonly BlackMageEventHandler _eventHandler;
     private bool _disposed;
@@ -43,6 +48,7 @@ public sealed class BlackMageRotation : IRotation, IRotationMeta, IDisposable
             Path.Combine(settingsDirectory, "DebugLogs"),
             () => _settingsStore.Settings.DecisionLogging);
         var missingStoredQt = _settingsStore.Settings.QtStates.Remove("压缩冰悖论");
+        missingStoredQt |= _settingsStore.Settings.QtStates.Remove("实验_B4星灵绝望");
         foreach (var (name, defaultValue) in QtList)
         {
             PromeSettings.Instance.AddQt(name, defaultValue);
@@ -68,19 +74,12 @@ public sealed class BlackMageRotation : IRotation, IRotationMeta, IDisposable
 
         var clock = SystemBlmClock.Instance;
         var normalizer = new PrBlmActionIdNormalizer();
-        _coordinator = new BlmCoordinator(clock, normalizer);
-        _followUp = new BlmFollowUpCoordinator(clock);
         _tracker = new BlmStateTracker(
-            _coordinator,
             BlmContext.Capture(clock),
             clock,
-            normalizer,
-            _followUp);
-        _dispatcher = new BlmActionDispatcher(
-            _coordinator,
-            _followUp,
-            normalizer: normalizer,
-            debugSink: _debugTrace);
+            normalizer);
+        _resolverInputAdapter = new BlmResolverInputAdapter();
+        _execution = new BlmResolverExecutionService(_tracker, _debugTrace);
         _consoleWindow = new LosPr.BLM.UI.BlmConsoleWindow(
             _settingsStore,
             _tracker.GetContextSnapshot,
@@ -90,7 +89,8 @@ public sealed class BlackMageRotation : IRotation, IRotationMeta, IDisposable
         };
         _eventHandler = new BlackMageEventHandler(
             _tracker,
-            _dispatcher,
+            _resolverInputAdapter,
+            _execution,
             clock,
             _debugTrace);
 
@@ -114,20 +114,30 @@ public sealed class BlackMageRotation : IRotation, IRotationMeta, IDisposable
             return null;
         }
 
-        return _dispatcher.ResolveAlways(
-            _tracker.GetContextSnapshot(),
-            BuildDecisionPolicy());
+        var context = _tracker.GetContextSnapshot();
+        return _execution.Resolve(
+            BlmResolverChannel.Always,
+            context,
+            HasHighPriorityAction());
     }
 
     public PAction? NextGcd()
-        => _dispatcher.ResolveGcd(
-            _tracker.GetContextSnapshot(),
-            BuildDecisionPolicy());
+    {
+        var context = _tracker.GetContextSnapshot();
+        return _execution.Resolve(
+            BlmResolverChannel.Gcd,
+            context,
+            HasHighPriorityAction());
+    }
 
     public PAction? NextOffGcd()
-        => _dispatcher.ResolveOffGcd(
-            _tracker.GetContextSnapshot(),
-            BuildDecisionPolicy());
+    {
+        var context = _tracker.GetContextSnapshot();
+        return _execution.Resolve(
+            BlmResolverChannel.OffGcd,
+            context,
+            HasHighPriorityAction());
+    }
 
     public IOpener? GetOpener() => null;
 
@@ -143,7 +153,7 @@ public sealed class BlackMageRotation : IRotation, IRotationMeta, IDisposable
     public void DrawSettings()
     {
         ImGui.TextUnformatted("Los 黑魔独立控制台");
-        ImGui.TextDisabled("当前阶段：100级标准单体循环与 Transition 已接入");
+        ImGui.TextDisabled("当前阶段：100级标准单体 Resolver 已接入生产入口");
 
         if (ImGui.Button("打开独立控制台", new Vector2(180f, 34f)))
         {
@@ -237,7 +247,7 @@ public sealed class BlackMageRotation : IRotation, IRotationMeta, IDisposable
         });
     }
 
-    private static BlmDecisionPolicy BuildDecisionPolicy()
+    private static bool HasHighPriorityAction()
     {
         var highPriorityQueueActive = false;
         try
@@ -248,9 +258,7 @@ public sealed class BlackMageRotation : IRotation, IRotationMeta, IDisposable
         {
         }
 
-        return BlmDecisionPolicy.Default with
-        {
-            HighPriorityQueueActive = highPriorityQueueActive,
-        };
+        return highPriorityQueueActive;
     }
+
 }

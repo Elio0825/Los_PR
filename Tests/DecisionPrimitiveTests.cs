@@ -1,5 +1,4 @@
 using LosPr.BLM.Core;
-using LosPr.BLM.Engine;
 using PromeRotation.Data;
 
 namespace Los.Tests;
@@ -8,7 +7,6 @@ internal static class DecisionPrimitiveTests
 {
     public static void RunAll()
     {
-        LegacyAckContractsRemainBinaryCompatible();
         RecentlyUsedUsesBoundedNormalizedAckHistory();
         IssuedMetadataFreezesAliasesAndOccurrence();
         IssuedGcdObservationOverridesPrediction();
@@ -20,94 +18,6 @@ internal static class DecisionPrimitiveTests
         AeAssistCooldownWindowBoundaries();
         ChargeAndAbilityReadyBoundaries();
         InstantAndWeaveCapacityFacts();
-    }
-
-    private static void LegacyAckContractsRemainBinaryCompatible()
-    {
-        var legacyAckConstructor = typeof(BlmActionEffectAck).GetConstructor(
-            new[]
-            {
-                typeof(long),
-                typeof(long),
-                typeof(uint),
-                typeof(uint),
-                typeof(uint),
-                typeof(long),
-                typeof(BlmPhase),
-                typeof(long),
-                typeof(BlmTransitionAckToken),
-                typeof(BlmFollowUpAckToken),
-            });
-        AssertEx.True(
-            legacyAckConstructor is not null,
-            "BlmActionEffectAck 必须保留旧 10 参数二进制构造");
-
-        var legacyDeconstruct = typeof(BlmActionEffectAck).GetMethod(
-            "Deconstruct",
-            new[]
-            {
-                typeof(long).MakeByRefType(),
-                typeof(long).MakeByRefType(),
-                typeof(uint).MakeByRefType(),
-                typeof(uint).MakeByRefType(),
-                typeof(uint).MakeByRefType(),
-                typeof(long).MakeByRefType(),
-                typeof(BlmPhase).MakeByRefType(),
-                typeof(long).MakeByRefType(),
-                typeof(BlmTransitionAckToken).MakeByRefType(),
-                typeof(BlmFollowUpAckToken).MakeByRefType(),
-            });
-        AssertEx.True(
-            legacyDeconstruct is not null,
-            "BlmActionEffectAck 必须保留旧 10-out Deconstruct ABI");
-
-        var legacyEnvelopeMethod = typeof(BlmStateTracker).GetMethod(
-            nameof(BlmStateTracker.CreateAckEnvelope),
-            new[]
-            {
-                typeof(uint),
-                typeof(uint),
-                typeof(uint),
-                typeof(BlmPhase),
-                typeof(long),
-            });
-        AssertEx.True(
-            legacyEnvelopeMethod is not null,
-            "BlmStateTracker 必须保留旧 5 参数 CreateAckEnvelope ABI");
-
-        var legacyAck = new BlmActionEffectAck(
-            1,
-            1,
-            100,
-            BLMSkill.炽炎,
-            1,
-            1000,
-            BlmPhase.Fire,
-            1,
-            default,
-            default);
-        AssertEx.Equal(0L, legacyAck.ObservedGcdStartedAtMs, "旧构造应默认无 GCD 起点观测");
-        AssertEx.Equal(0f, legacyAck.ObservedGcdRemainMs, "旧构造应默认无 GCD 剩余观测");
-        AssertEx.False(legacyAck.HasHasteAtAck, "旧构造应默认无咏速观测");
-        var (
-            combatSerial,
-            stateGeneration,
-            sourceId,
-            actionId,
-            globalSequence,
-            receivedAtMs,
-            phaseBefore,
-            phaseSerialBefore,
-            _,
-            _) = legacyAck;
-        AssertEx.Equal(1L, combatSerial, "旧 Deconstruct CombatSerial 错误");
-        AssertEx.Equal(1L, stateGeneration, "旧 Deconstruct StateGeneration 错误");
-        AssertEx.Equal(100u, sourceId, "旧 Deconstruct SourceId 错误");
-        AssertEx.Equal(BLMSkill.炽炎, actionId, "旧 Deconstruct ActionId 错误");
-        AssertEx.Equal(1u, globalSequence, "旧 Deconstruct GlobalSequence 错误");
-        AssertEx.Equal(1000L, receivedAtMs, "旧 Deconstruct ReceivedAtMs 错误");
-        AssertEx.Equal(BlmPhase.Fire, phaseBefore, "旧 Deconstruct PhaseBefore 错误");
-        AssertEx.Equal(1L, phaseSerialBefore, "旧 Deconstruct PhaseSerialBefore 错误");
     }
 
     private static void RecentlyUsedUsesBoundedNormalizedAckHistory()
@@ -385,6 +295,45 @@ internal static class DecisionPrimitiveTests
             "后续正确 Ack 应命中原签发");
         AssertEx.Equal(issuedAtMs, matched.OccurredAtMs, "正确 Ack 应回溯到 issuedAt");
         AssertEx.True(matched.WasInstant, "正确 Ack 应继承签发瞬发事实");
+
+        var superseded = CreateFixture();
+        var supersededIssuedAtMs = superseded.Clock.NowMs;
+        AssertEx.True(
+            superseded.Tracker.TryRegisterIssuedAction(
+                new BlmIssuedActionMetadata(
+                    superseded.Tracker.StateGeneration,
+                    BLMSkill.冰澈,
+                    BLMSkill.冰澈,
+                    supersededIssuedAtMs,
+                    0,
+                    supersededIssuedAtMs + 5000,
+                    true,
+                    true)),
+            "手动覆盖测试签发应注册");
+        superseded.Clock.Advance(10);
+        AssertEx.True(
+            superseded.Tracker.ApplyActionEffect(CreateAck(
+                superseded,
+                BLMSkill.炽炎,
+                1,
+                superseded.Clock.NowMs,
+                2400f)),
+            "签发后启动的手动 GCD 应被接受");
+        AssertEx.False(
+            superseded.Tracker.GetTrackerSnapshot().HasPendingIssuedAction,
+            "签发后启动的新 GCD 必须清除已被覆盖的 Pending");
+        AssertEx.True(
+            superseded.Tracker.TryRegisterIssuedAction(
+                new BlmIssuedActionMetadata(
+                    superseded.Tracker.StateGeneration,
+                    BLMSkill.炽炎,
+                    BLMSkill.炽炎,
+                    superseded.Clock.NowMs,
+                    1,
+                    superseded.Clock.NowMs + 5000,
+                    false,
+                    true)),
+            "手动覆盖后应立即允许新签发");
 
         var stale = CreateFixture();
         var staleIssuedAtMs = stale.Clock.NowMs;
@@ -1166,7 +1115,6 @@ internal static class DecisionPrimitiveTests
     {
         var clock = new FakeClock(10_000);
         normalizer ??= new MappingActionIdNormalizer();
-        var coordinator = new BlmCoordinator(clock, normalizer);
         var context = new BlmContext
         {
             CapturedAtMs = clock.NowMs,
@@ -1186,7 +1134,7 @@ internal static class DecisionPrimitiveTests
         };
         return new Fixture(
             clock,
-            new BlmStateTracker(coordinator, context, clock, normalizer));
+            new BlmStateTracker(context, clock, normalizer));
     }
 
     private static BlmActionEffectAck CreateAck(
