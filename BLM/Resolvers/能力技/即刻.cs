@@ -22,6 +22,13 @@ internal static partial class Level100AbilityResolvers
             return BlmResolverCheckResult.Reject(-80);
         }
 
+        if (input.Context.IsAoeMode)
+        {
+            return input.Settings.TtkEnabled
+                ? Self(input, MageUniversalSkill.即刻咏唱, 999)
+                : BlmResolverCheckResult.Reject(-234);
+        }
+
         if (level < 90 && input.Settings.TtkEnabled)
         {
             return Self(input, MageUniversalSkill.即刻咏唱, 999);

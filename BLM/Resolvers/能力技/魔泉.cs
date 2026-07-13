@@ -40,6 +40,11 @@ internal static partial class Level100AbilityResolvers
             return BlmResolverCheckResult.Reject(-8);
         }
 
+        if (context.IsAoeMode && context.GcdRemainMs < 500d)
+        {
+            return BlmResolverCheckResult.Reject(-9);
+        }
+
         if (context.UmbralIceStacks >= 3)
         {
             return BlmResolverCheckResult.Reject(-10);
@@ -73,6 +78,11 @@ internal static partial class Level100AbilityResolvers
         BlmResolverCandidate? gcdCandidate,
         BlmResolverCandidate? offGcdCandidate)
     {
+        if (input.Context.IsAoeMode)
+        {
+            return false;
+        }
+
         if (offGcdCandidate is not { ResolverId: "Ability.墨泉" })
         {
             return false;

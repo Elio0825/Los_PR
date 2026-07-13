@@ -32,6 +32,8 @@ public static class Level100ResolverEngine
         "3401718A45A66C7E5F619015D00E26F91F273BB05541D8229314C079F3234565";
     public const string LosAeManafontSha256 =
         "1F2102220502B790F62563F536F428C09A8DEADCDFA4C7C0EFA05929B6C70ACE";
+    public const string LosAeInstantGcdTriggerSha256 =
+        "5D70EB5EF186407B6FC6798CF14DCE81313207A763B0C4F82CF667451B6756BB";
     public const string FrozenManifestSha256 =
         "F349964AE903890E5E788E6242A0425CD6A41CCC93208820CBB6C8D2DDE3DB6A";
 
@@ -95,7 +97,9 @@ public static class Level100ResolverEngine
             return CreateFrame(input, null, null, null, false, false);
         }
 
-        var gcdCandidate = EvaluateChannel(input, BlmResolverChannel.Gcd);
+        var gcdCandidate = input.Context.IsSingleTargetMode
+            ? EvaluateChannel(input, BlmResolverChannel.Gcd)
+            : null;
         var alwaysCandidate = EvaluateChannel(input, BlmResolverChannel.Always);
         var offGcdCandidate = EvaluateChannel(input, BlmResolverChannel.OffGcd);
         var holdGcdForTranspose =
@@ -124,7 +128,6 @@ public static class Level100ResolverEngine
             && context.InCombat
             && context.IsAlive
             && context.CanAct
-            && context.IsSingleTargetMode
             && context.HasTarget
             && context.CanUseAttackActionOnTarget
             && !input.SpecialSequenceActive;
@@ -225,7 +228,6 @@ public static class Level100ResolverEngine
             || !context.InCombat
             || !context.IsAlive
             || !context.CanAct
-            || !context.IsSingleTargetMode
             || !context.HasTarget
             || !context.CanUseAttackActionOnTarget)
         {

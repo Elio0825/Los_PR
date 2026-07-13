@@ -49,6 +49,19 @@ internal static partial class Level100AbilityResolvers
             return BlmResolverCheckResult.Reject(-4);
         }
 
+        if (context.IsAoeMode)
+        {
+            if (context.Level >= 100
+                && context.InFire
+                && context.Mp < 800
+                && context.AstralSoulStacks == 6)
+            {
+                return BlmResolverCheckResult.Reject(-22);
+            }
+
+            return BlmResolverCheckResult.Reject(-234);
+        }
+
         if (context.InFire)
         {
             var manafont = Level100ResolverFacts.Action(input, BLMSkill.魔泉);

@@ -201,7 +201,6 @@ internal static class Level100ResolverParityTests
             input.Context with { InCombat = false },
             input.Context with { IsAlive = false },
             input.Context with { CanAct = false },
-            input.Context with { IsSingleTargetMode = false },
             input.Context with { HasTarget = false },
             input.Context with { CanUseAttackActionOnTarget = false },
         };
@@ -216,6 +215,17 @@ internal static class Level100ResolverParityTests
                 frame.BlockReason.Contains("LifecycleOrTargetGate", StringComparison.Ordinal),
                 "生命周期/目标阻断必须给出稳定原因");
         }
+
+        var aoe = Level100ResolverEngine.Evaluate(input with
+        {
+            Context = input.Context with
+            {
+                IsSingleTargetMode = false,
+                EnemyCount = 3,
+            },
+        });
+        AssertEx.True(aoe.GcdCandidate is null, "AOE健康帧不得产生GCD候选");
+        AssertEx.False(aoe.DeliveryBlocked, "AOE健康帧不得被生命周期Gate阻断");
 
         var special = Level100ResolverEngine.Evaluate(input with { SpecialSequenceActive = true });
         AssertEx.True(special.GcdCandidate is null, "特殊序列必须排除普通Resolver");

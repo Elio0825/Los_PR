@@ -413,7 +413,7 @@ internal static class Level1To89ResolverParityTests
             BaseInput(12),
             BaseInput(12).Context with { IsSingleTargetMode = false });
         AssertEx.True(aoeFrame.GcdCandidate is null, "AOE模式不得误入单体Resolver");
-        AssertEx.True(aoeFrame.DeliveryBlocked, "4B AOE模式必须生产fail closed");
+        AssertEx.False(aoeFrame.DeliveryBlocked, "4C-0 AOE健康帧不得阻断能力技通道");
     }
 
     private static BlmDecisionFrame SwiftcastFrame(int level, bool ttk, int iceStacks)

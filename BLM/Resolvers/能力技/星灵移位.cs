@@ -1,11 +1,45 @@
 namespace LosPr.BLM.Resolvers.Level100;
 
+internal enum BlmAoeTransposeDirection
+{
+    None,
+    ToFire,
+    ToIce,
+}
+
+internal enum BlmAoeTransposeDisposition
+{
+    None,
+    CastNow,
+    Hold,
+    Fill,
+    DeferToManafont,
+}
+
+internal readonly record struct BlmAoeTransposePlan(
+    BlmAoeTransposeDirection Direction,
+    BlmAoeTransposeDisposition Disposition,
+    uint FillActionId)
+{
+    public static BlmAoeTransposePlan None { get; } = new(
+        BlmAoeTransposeDirection.None,
+        BlmAoeTransposeDisposition.None,
+        0);
+}
+
 internal static partial class Level100AbilityResolvers
 {
     private const double TransposeHoldWindowMs = 2000d;
 
     public static bool ShouldHoldGcdForTranspose(BlmResolverInput input)
     {
+        if (input.Context.IsAoeMode)
+        {
+            var plan = BuildAoeTransposePlan(input);
+            return plan.Disposition is BlmAoeTransposeDisposition.CastNow
+                or BlmAoeTransposeDisposition.Hold;
+        }
+
         var transpose = Level100ResolverFacts.Action(input, BLMSkill.星灵移位);
         return transpose is { IsUnlocked: true }
             && transpose.CooldownRemainMs <= TransposeHoldWindowMs
@@ -25,6 +59,14 @@ internal static partial class Level100AbilityResolvers
             return BlmResolverCheckResult.Reject(-2);
         }
 
+        if (input.Context.IsAoeMode)
+        {
+            var plan = BuildAoeTransposePlan(input);
+            return plan.Disposition == BlmAoeTransposeDisposition.CastNow
+                ? Self(input, BLMSkill.星灵移位, 1)
+                : BlmResolverCheckResult.Reject(-1);
+        }
+
         if (transpose.CooldownRemainMs > 0d)
         {
             return BlmResolverCheckResult.Reject(-1);
@@ -34,6 +76,95 @@ internal static partial class Level100AbilityResolvers
         return checkCode < 0
             ? BlmResolverCheckResult.Reject(checkCode)
             : Self(input, BLMSkill.星灵移位, checkCode);
+    }
+
+    internal static BlmAoeTransposePlan BuildAoeTransposePlan(
+        BlmResolverInput input)
+    {
+        var context = input.Context;
+        var transpose = Level100ResolverFacts.Action(input, BLMSkill.星灵移位);
+        if (!context.IsAoeMode
+            || context.Level < 58
+            || transpose is not { IsUnlocked: true })
+        {
+            return BlmAoeTransposePlan.None;
+        }
+
+        var direction = BlmAoeTransposeDirection.None;
+        if (context.InIce
+            && (context.UmbralHearts == 3
+                || Level100ResolverFacts.PreviousGcdMatches(input, BLMSkill.玄冰)
+                || Level100ResolverFacts.RecentlyUsed(input, BLMSkill.玄冰, 2500)))
+        {
+            direction = BlmAoeTransposeDirection.ToFire;
+        }
+        else if (context.InFire
+            && context.Mp < 800
+            && (context.Level < 100 || context.AstralSoulStacks != 6))
+        {
+            direction = BlmAoeTransposeDirection.ToIce;
+        }
+
+        if (direction == BlmAoeTransposeDirection.None)
+        {
+            return BlmAoeTransposePlan.None;
+        }
+
+        if (direction == BlmAoeTransposeDirection.ToIce
+            && ShouldDeferAoeTransposeToManafont(input))
+        {
+            return new BlmAoeTransposePlan(
+                direction,
+                BlmAoeTransposeDisposition.DeferToManafont,
+                0);
+        }
+
+        if (transpose.CooldownRemainMs <= 0d)
+        {
+            return new BlmAoeTransposePlan(
+                direction,
+                BlmAoeTransposeDisposition.CastNow,
+                0);
+        }
+
+        if (transpose.CooldownRemainMs <= TransposeHoldWindowMs)
+        {
+            return new BlmAoeTransposePlan(
+                direction,
+                BlmAoeTransposeDisposition.Hold,
+                0);
+        }
+
+        var fillActionId =
+            Level100SingleTargetResolvers.SelectAvailableAoeInstantGcdForTranspose(input);
+        return new BlmAoeTransposePlan(
+            direction,
+            fillActionId == 0
+                ? BlmAoeTransposeDisposition.Hold
+                : BlmAoeTransposeDisposition.Fill,
+            fillActionId);
+    }
+
+    private static bool ShouldDeferAoeTransposeToManafont(BlmResolverInput input)
+    {
+        if (!input.Settings.ManafontEnabled)
+        {
+            return false;
+        }
+
+        var manafontReady = Level100ResolverFacts.IsReadyWithCanCast(
+            input,
+            BLMSkill.魔泉);
+        if (manafontReady)
+        {
+            return !input.IsIdle || input.Context.GcdRemainMs >= 500d;
+        }
+
+        return Level100ResolverFacts.CooldownInNextGcdWindows(
+                input,
+                BLMSkill.魔泉,
+                2)
+            || Level100ResolverFacts.RecentlyUsed(input, BLMSkill.魔泉);
     }
 
     private static int CheckSingleTargetTranspose(BlmResolverInput input)

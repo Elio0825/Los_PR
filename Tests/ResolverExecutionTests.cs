@@ -23,6 +23,7 @@ internal static class ResolverExecutionTests
         Level90CandidateIsDeliveredInProduction();
         Level1To89CandidatesAreDeliveredInProduction();
         Level60IceAckAheadOfGaugeDeliversBlizzardFour();
+        AoeSharedAbilitiesAreDeliveredWithoutGcdLeak();
     }
 
     private static void SameFrameAndPendingPreventDuplicateDelivery()
@@ -625,6 +626,174 @@ internal static class ResolverExecutionTests
             fixture.Context.TargetEntityId);
     }
 
+    private static void AoeSharedAbilitiesAreDeliveredWithoutGcdLeak()
+    {
+        var transposeContext = TestContext.Base() with
+        {
+            IsAoeMode = true,
+            EnemyCount = 3,
+            Phase = BlmPhase.Ice,
+            AfStacks = 0,
+            IceStacks = 1,
+            UmbralHearts = 3,
+            GcdRemainSeconds = 0.2f,
+        };
+        var transposeFixture = CreateFixture(transposeContext);
+        var transposeInput = Input(
+            transposeFixture.Context,
+            BlmResolverSettings.Default with
+            {
+                ManafontEnabled = false,
+                DotEnabled = false,
+                AmplifierEnabled = false,
+                LeyLinesEnabled = false,
+                AutoMitigationEnabled = false,
+            },
+            [Ready(BLMSkill.星灵移位)]);
+        AssertEx.True(
+            transposeFixture.Execution.BeginFrame(
+                transposeFixture.Context,
+                transposeInput),
+            "AOE星灵生产帧应建立");
+        AssertEx.True(
+            transposeFixture.Execution.Resolve(
+                BlmResolverChannel.Gcd,
+                transposeFixture.Context) is null,
+            "AOE生产帧不得泄漏GCD");
+        AssertAction(
+            transposeFixture.Execution.Resolve(
+                BlmResolverChannel.Always,
+                transposeFixture.Context),
+            BLMSkill.星灵移位,
+            ActionType.Always,
+            0);
+
+        var swiftContext = TestContext.Base() with
+        {
+            IsAoeMode = true,
+            EnemyCount = 3,
+            Level = 100,
+            Phase = BlmPhase.Fire,
+            GcdRemainSeconds = 1.5f,
+        };
+        var swiftFixture = CreateFixture(swiftContext);
+        var swiftPrevious = Success(
+            swiftFixture.Context.Tracker.StateGeneration,
+            BLMSkill.爆炎,
+            wasInstant: true);
+        var swiftInput = Input(
+            swiftFixture.Context,
+            BlmResolverSettings.Default with
+            {
+                TtkEnabled = true,
+                ManafontEnabled = false,
+                DotEnabled = false,
+                AmplifierEnabled = false,
+                LeyLinesEnabled = false,
+                AutoMitigationEnabled = false,
+            },
+            [Ready(MageUniversalSkill.即刻咏唱)],
+            swiftPrevious);
+        AssertEx.True(
+            swiftFixture.Execution.BeginFrame(swiftFixture.Context, swiftInput),
+            "AOE即刻生产帧应建立");
+        AssertAction(
+            swiftFixture.Execution.Resolve(
+                BlmResolverChannel.OffGcd,
+                swiftFixture.Context),
+            MageUniversalSkill.即刻咏唱,
+            ActionType.OffGcd,
+            0);
+
+        var tripleContext = swiftContext with { Level = 100 };
+        var tripleFixture = CreateFixture(tripleContext);
+        var triplePrevious = Success(
+            tripleFixture.Context.Tracker.StateGeneration,
+            BLMSkill.爆炎,
+            wasInstant: true);
+        var tripleInput = Input(
+            tripleFixture.Context,
+            BlmResolverSettings.Default with
+            {
+                TtkEnabled = true,
+                ManafontEnabled = false,
+                DotEnabled = false,
+                AmplifierEnabled = false,
+                LeyLinesEnabled = false,
+                AutoMitigationEnabled = false,
+            },
+            [Ready(BLMSkill.三连咏唱)],
+            triplePrevious);
+        AssertEx.True(
+            tripleFixture.Execution.BeginFrame(tripleFixture.Context, tripleInput),
+            "AOE三连生产帧应建立");
+        AssertEx.True(
+            tripleFixture.Execution.Resolve(
+                BlmResolverChannel.Gcd,
+                tripleFixture.Context) is null,
+            "AOE三连生产帧不得泄漏GCD");
+        AssertAction(
+            tripleFixture.Execution.Resolve(
+                BlmResolverChannel.OffGcd,
+                tripleFixture.Context),
+            BLMSkill.三连咏唱,
+            ActionType.OffGcd,
+            0);
+        AssertEx.True(
+            tripleFixture.Execution.Resolve(
+                BlmResolverChannel.OffGcd,
+                tripleFixture.Context) is null,
+            "AOE三连Pending期间不得重复交付");
+
+        var manafontContext = swiftContext with
+        {
+            Mp = 799,
+            AfStacks = 3,
+            UmbralHearts = 0,
+            AstralSoul = 0,
+            GcdRemainSeconds = 1.5f,
+        };
+        var manafontFixture = CreateFixture(manafontContext);
+        var manafontPrevious = Success(
+            manafontFixture.Context.Tracker.StateGeneration,
+            BLMSkill.耀星,
+            wasInstant: true);
+        var manafontInput = Input(
+            manafontFixture.Context,
+            BlmResolverSettings.Default with
+            {
+                ManafontEnabled = true,
+                DotEnabled = false,
+                AmplifierEnabled = false,
+                LeyLinesEnabled = false,
+                AutoMitigationEnabled = false,
+            },
+            [Ready(BLMSkill.魔泉)],
+            manafontPrevious);
+        AssertEx.True(
+            manafontFixture.Execution.BeginFrame(
+                manafontFixture.Context,
+                manafontInput),
+            "AOE Manafont生产帧应建立");
+        AssertEx.True(
+            manafontFixture.Execution.Resolve(
+                BlmResolverChannel.Gcd,
+                manafontFixture.Context) is null,
+            "AOE Manafont生产帧不得泄漏GCD");
+        AssertAction(
+            manafontFixture.Execution.Resolve(
+                BlmResolverChannel.OffGcd,
+                manafontFixture.Context),
+            BLMSkill.魔泉,
+            ActionType.OffGcd,
+            0);
+        AssertEx.True(
+            manafontFixture.Execution.Resolve(
+                BlmResolverChannel.OffGcd,
+                manafontFixture.Context) is null,
+            "AOE Manafont Pending期间不得重复交付");
+    }
+
     private static Fixture CreateFixture(BlmContext context)
     {
         var clock = new FakeClock(context.CapturedAtMs);
@@ -686,7 +855,8 @@ internal static class ResolverExecutionTests
                 CanAct = context.CanAct,
                 IsMoving = context.IsMoving,
                 IsCasting = context.IsCasting,
-                IsSingleTargetMode = true,
+                IsSingleTargetMode = !context.IsAoeMode,
+                EnemyCount = context.EnemyCount,
                 HasTarget = context.HasTarget,
                 CanUseAttackActionOnTarget = context.HasValidTarget,
                 CurrentTargetId = context.TargetEntityId,

@@ -78,6 +78,8 @@ internal static class Phase3FactAdapterTests
         {
             IsCasting = true,
             CurrentCastingActionId = BLMSkill.冰封,
+            EnemyCount = 2,
+            IsAoeMode = true,
             HasLeyLines = true,
             HasLeyLinesStatus737 = true,
             HasLeyLinesHaste = false,
@@ -105,6 +107,9 @@ internal static class Phase3FactAdapterTests
 
         AssertEx.Equal(BLMSkill.冰封, input.CurrentCastingActionId, "当前读条动作未投影");
         AssertEx.Equal(generation, input.StateGeneration, "输入必须显式携带 Tracker generation");
+        AssertEx.False(input.Context.IsSingleTargetMode, "最终AOE模式未映射");
+        AssertEx.Equal(2, input.Context.EnemyCount, "敌人数事实未映射");
+        AssertEx.True(input.Context.IsTwoTargetAoe, "双目标AOE派生事实错误");
         AssertEx.True(input.Context.HasLeyLinesStatus737, "737 应独立投影");
         AssertEx.False(input.Context.HasLeyLinesHaste738, "738 不得由合并 HasLeyLines 推断");
         AssertEx.Equal(3, input.Context.MaxPolyglotStacks, "通晓等级上限事实未投影");
@@ -559,6 +564,7 @@ internal static class Phase3FactAdapterTests
             BLMSkill.火炎,
             BLMSkill.冰结,
             BLMSkill.闪雷,
+            BLMSkill.震雷,
             BLMSkill.烈炎,
             BLMSkill.星灵移位,
             BLMSkill.爆炎,

@@ -10,6 +10,7 @@ internal static class Program
             ("100级单体 Resolver 行为闭包", Level100ResolverParityTests.Run),
             ("90–99级单体 Resolver 行为闭包", Level90ResolverParityTests.RunAll),
             ("1–89级单体 Resolver 行为闭包", Level1To89ResolverParityTests.RunAll),
+            ("4C-0 单体/AOE共享能力技协调", Phase4C0AbilityCoordinationTests.RunAll),
             ("生产事实适配器", Phase3FactAdapterTests.RunAll),
             ("3B Resolver 生产执行器", ResolverExecutionTests.RunAll),
             ("Tracker 生命周期与 Manafont 对账", TrackerProductionTests.RunAll),

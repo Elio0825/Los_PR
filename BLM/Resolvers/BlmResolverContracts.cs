@@ -96,6 +96,7 @@ public sealed record BlmResolverContextFacts
     public bool IsMoving { get; init; }
     public bool IsCasting { get; init; }
     public bool IsSingleTargetMode { get; init; }
+    public int EnemyCount { get; init; }
     public bool HasTarget { get; init; }
     public bool CanUseAttackActionOnTarget { get; init; }
     public uint CurrentTargetId { get; init; }
@@ -122,6 +123,9 @@ public sealed record BlmResolverContextFacts
 
     public bool InFire => Phase == BlmPhase.Fire;
     public bool InIce => Phase == BlmPhase.Ice;
+    public bool IsAoeMode => !IsSingleTargetMode;
+    public bool IsTwoTargetAoe => IsAoeMode && EnemyCount == 2;
+    public bool IsThreePlusAoe => IsAoeMode && EnemyCount >= 3;
     public bool HasInstantCast =>
         BlmDecisionPrimitives.HasInstantCast(HasSwiftcast, TriplecastStacks);
     public double GcdRemainMs => Math.Max(0d, GcdRemainSeconds * 1000d);
