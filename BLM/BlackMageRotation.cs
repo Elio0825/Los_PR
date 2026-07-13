@@ -153,7 +153,7 @@ public sealed class BlackMageRotation : IRotation, IRotationMeta, IDisposable
     public void DrawSettings()
     {
         ImGui.TextUnformatted("Los 黑魔独立控制台");
-        ImGui.TextDisabled("当前阶段：100级标准单体 Resolver 已接入生产入口");
+        ImGui.TextDisabled("当前阶段：90–100级标准单体 Resolver 已接入生产入口");
 
         if (ImGui.Button("打开独立控制台", new Vector2(180f, 34f)))
         {

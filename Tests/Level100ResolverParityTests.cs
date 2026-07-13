@@ -46,6 +46,10 @@ internal static class Level100ResolverParityTests
             Level100ResolverEngine.LosAeLevel100SingleTargetSha256,
             "单体100 规格源哈希必须冻结");
         AssertEx.Equal(
+            "5BA6987888A057224F2CBC11B71A3A6185CA8640BE95D360793D77048068E58D",
+            Level100ResolverEngine.LosAeLevel90SingleTargetSha256,
+            "单体90 规格源哈希必须冻结");
+        AssertEx.Equal(
             "F87155A138C95B561B54BC0575DDFFC21014FBC865021AA379D5CC65004F8C83",
             Level100ResolverEngine.LosAeTransposeSha256,
             "星灵移位规格源哈希必须冻结");
@@ -126,6 +130,10 @@ internal static class Level100ResolverParityTests
             Level100ResolverEngine.Manifest[21].Disposition,
             "永久 -99 的核爆补耀星必须与模式拒绝项区分");
         AssertEx.Equal(
+            BlmResolverManifestDisposition.Active,
+            Level100ResolverEngine.Manifest[16].Disposition,
+            "90–99级单体Resolver必须按原顺序激活");
+        AssertEx.Equal(
             22,
             Level100ResolverEngine.Manifest.Count(entry => entry.Channel == BlmResolverChannel.Gcd),
             "GCD 注册数量错误");
@@ -189,7 +197,7 @@ internal static class Level100ResolverParityTests
         {
             input.Context with { IsAvailable = false },
             input.Context with { AcrEnabled = false },
-            input.Context with { Level = 99 },
+            input.Context with { Level = 89 },
             input.Context with { InCombat = false },
             input.Context with { IsAlive = false },
             input.Context with { CanAct = false },

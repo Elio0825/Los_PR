@@ -15,10 +15,12 @@ internal static class ResolverExecutionTests
         FireEndHoldPrioritizesTranspose();
         ManafontIsDeliveredAsOffGcd();
         OffGcdWaitsForActualWeaveWindow();
+        ManafontBridgeDeliversAfterHardcast();
         TargetSwitchCancelsOldPending();
         HighPriorityAndFrameDriftFailClosed();
         ManualRecoveryAlwaysWorksWithoutPreviousGcd();
         IceParadoxTriplecastBlizzard3SequenceIsDeliverable();
+        Level90CandidateIsDeliveredInProduction();
     }
 
     private static void SameFrameAndPendingPreventDuplicateDelivery()
@@ -224,11 +226,154 @@ internal static class ResolverExecutionTests
                 == BLMSkill.魔泉,
             "测试前提要求 Resolver 已选出魔泉");
         AssertEx.True(
+            fixture.Execution.GetSnapshot()!.Decision.AlwaysBridgeCandidate?.ActionId
+                == BLMSkill.魔泉,
+            "读条中火末必须建立魔泉Always桥");
+        AssertEx.True(
+            fixture.Execution.Resolve(BlmResolverChannel.Gcd, fixture.Context) is null,
+            "魔泉桥成立时不得提前交付回冰GCD");
+        AssertEx.True(
             fixture.Execution.Resolve(BlmResolverChannel.OffGcd, fixture.Context) is null,
             "读条中不得提前向 PR 交付 OffGCD");
+        AssertEx.True(
+            fixture.Execution.Resolve(BlmResolverChannel.Always, fixture.Context) is null,
+            "读条结束前Always桥也不得提前交付魔泉");
         AssertEx.False(
             fixture.Tracker.GetTrackerSnapshot().HasPendingIssuedAction,
             "尚未进入真实 weave 窗口时不得提前注册 Pending");
+    }
+
+    private static void ManafontBridgeDeliversAfterHardcast()
+    {
+        var context = FireContext() with
+        {
+            Level = 99,
+            Mp = 0,
+            AstralSoul = 0,
+            IsCasting = false,
+            CastRemainSeconds = 0f,
+            GcdRemainSeconds = 0.3f,
+        };
+        var fixture = CreateFixture(context);
+        var settings = BlmResolverSettings.Default with { ManafontEnabled = true };
+        var actions = new[] { Ready(BLMSkill.魔泉) };
+        var previousGcd = Success(
+            fixture.Context.Tracker.StateGeneration,
+            BLMSkill.绝望,
+            wasInstant: false);
+        var input = Input(
+            fixture.Context,
+            settings,
+            actions,
+            previousGcd);
+        AssertEx.True(
+            fixture.Execution.BeginFrame(fixture.Context, input),
+            "硬读条结束后的魔泉桥帧应建立");
+        var decision = fixture.Execution.GetSnapshot()!.Decision;
+        AssertEx.True(
+            decision.GcdCandidate?.ActionId == BLMSkill.冰封,
+            "桥接测试前提要求主循环准备回冰");
+        AssertEx.True(
+            decision.AlwaysBridgeCandidate?.ActionId == BLMSkill.魔泉,
+            "桥接测试前提要求Always桥持有魔泉");
+        AssertEx.True(
+            decision.GcdBlockedByAlwaysBridge,
+            "魔泉交付前必须阻止回冰GCD");
+        AssertEx.True(
+            fixture.Execution.Resolve(BlmResolverChannel.Gcd, fixture.Context) is null,
+            "魔泉桥成立时GCD入口必须fail closed");
+        AssertEx.True(
+            fixture.Execution.Resolve(BlmResolverChannel.OffGcd, fixture.Context) is null,
+            "0.3秒窗口不得从普通OffGCD入口交付");
+        AssertAction(
+            fixture.Execution.Resolve(BlmResolverChannel.Always, fixture.Context),
+            BLMSkill.魔泉,
+            ActionType.Always,
+            0);
+        AssertEx.True(
+            fixture.Tracker.GetTrackerSnapshot().HasPendingIssuedAction,
+            "Always桥交付后必须建立通用Pending");
+        AssertEx.True(
+            fixture.Execution.Resolve(BlmResolverChannel.Always, fixture.Context) is null,
+            "魔泉Ack前Always桥不得重复交付");
+
+        fixture.Clock.Advance(1);
+        fixture.Tracker.Reconcile(fixture.Context with
+        {
+            CapturedAtMs = fixture.Clock.NowMs,
+        });
+        var waitingAck = fixture.Tracker.GetContextSnapshot();
+        AssertEx.True(
+            fixture.Execution.BeginFrame(
+                waitingAck,
+                Input(waitingAck, settings, actions, previousGcd)),
+            "等待魔泉Ack时下一生产帧应建立");
+        AssertEx.True(
+            fixture.Execution.Resolve(BlmResolverChannel.Gcd, waitingAck) is null,
+            "魔泉Ack前跨帧不得让冰封抢先");
+        AssertEx.True(
+            fixture.Execution.Resolve(BlmResolverChannel.Always, waitingAck) is null,
+            "魔泉Ack前跨帧不得重复交付Always桥");
+
+        fixture.Clock.Advance(100);
+        var ack = fixture.Tracker.CreateAckEnvelope(
+            fixture.Context.PlayerEntityId,
+            BLMSkill.魔泉,
+            1,
+            BlmPhase.Fire,
+            fixture.Clock.NowMs);
+        AssertEx.True(fixture.Tracker.ApplyActionEffect(ack), "Always桥魔泉Ack应被Tracker接收");
+        var postAck = fixture.Tracker.GetContextSnapshot() with
+        {
+            CapturedAtMs = fixture.Clock.NowMs,
+        };
+        AssertEx.False(postAck.Tracker.HasPendingIssuedAction, "魔泉Ack必须清除Always桥Pending");
+        AssertEx.True(postAck.Tracker.PendingGaugeReconcile, "魔泉Ack后必须等待Gauge恢复");
+        AssertEx.True(
+            fixture.Execution.BeginFrame(
+                postAck,
+                Input(postAck, settings, actions, previousGcd)),
+            "魔泉Ack后的阻断帧应可观察");
+        AssertEx.True(
+            fixture.Execution.Resolve(BlmResolverChannel.Gcd, postAck) is null,
+            "Manafont Gauge对账前不得交付冰封");
+        AssertEx.True(
+            fixture.Execution.Resolve(BlmResolverChannel.Always, postAck) is null,
+            "Manafont Gauge对账前不得重复交付Always桥");
+
+        fixture.Clock.Advance(16);
+        fixture.Tracker.Reconcile(postAck with
+        {
+            CapturedAtMs = fixture.Clock.NowMs,
+            Mp = postAck.MaxMp,
+            AfStacks = 3,
+            IceStacks = 0,
+            UmbralHearts = 3,
+            HasParadox = true,
+            HasThunderhead = true,
+        });
+        var restored = fixture.Tracker.GetContextSnapshot();
+        AssertEx.False(restored.Tracker.PendingGaugeReconcile, "资源恢复后必须完成Manafont Gauge对账");
+        AssertEx.True(restored.Tracker.ManafontActiveThisFire, "Gauge确认后必须激活Manafont火段事实");
+        AssertEx.Equal(0, restored.Tracker.Fire4CountSinceManafont, "Manafont后火四计数必须从零开始");
+        AssertEx.True(
+            fixture.Execution.BeginFrame(
+                restored,
+                Input(
+                    restored,
+                    settings,
+                    [Ready(BLMSkill.炽炎)],
+                    previousGcd)),
+            "Manafont Gauge恢复后的续火帧应建立");
+        AssertEx.Equal(
+            BLMSkill.炽炎,
+            fixture.Execution.GetSnapshot()!.Decision.GcdCandidate!.ActionId,
+            "Manafont Gauge恢复后必须产生炽炎候选");
+        AssertAction(
+            fixture.Execution.Resolve(BlmResolverChannel.Gcd, restored),
+            BLMSkill.炽炎,
+            ActionType.Gcd,
+            restored.TargetEntityId);
     }
 
     private static void TargetSwitchCancelsOldPending()
@@ -363,6 +508,36 @@ internal static class ResolverExecutionTests
             BLMSkill.冰封,
             ActionType.Gcd,
             blizzardFixture.Context.TargetEntityId);
+    }
+
+    private static void Level90CandidateIsDeliveredInProduction()
+    {
+        var fixture = CreateFixture(FireContext() with { Level = 90 });
+        var input = Input(
+            fixture.Context,
+            BlmResolverSettings.Default with
+            {
+                ManafontEnabled = false,
+                DotEnabled = false,
+                MoveXenoglossyEnabled = false,
+                AmplifierEnabled = false,
+                LeyLinesEnabled = false,
+                AutoMitigationEnabled = false,
+            },
+            [Ready(BLMSkill.炽炎)]);
+        AssertEx.True(
+            fixture.Execution.BeginFrame(fixture.Context, input),
+            "90级生产帧应建立");
+        var candidate = fixture.Execution.GetSnapshot()!.Decision.GcdCandidate;
+        AssertEx.True(candidate is not null, "90级生产帧必须产生GCD候选");
+        AssertEx.Equal(BLMSkill.炽炎, candidate!.ActionId, "90级生产候选动作错误");
+        AssertEx.Equal("GCD.单体90_99", candidate.ResolverId, "90级生产候选Resolver错误");
+        AssertEx.Equal(16, candidate.ManifestOrder, "90级生产候选manifest顺序错误");
+        AssertAction(
+            fixture.Execution.Resolve(BlmResolverChannel.Gcd, fixture.Context),
+            BLMSkill.炽炎,
+            ActionType.Gcd,
+            fixture.Context.TargetEntityId);
     }
 
     private static Fixture CreateFixture(BlmContext context)

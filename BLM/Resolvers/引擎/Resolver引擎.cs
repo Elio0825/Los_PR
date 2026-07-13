@@ -14,6 +14,8 @@ public static class Level100ResolverEngine
         "0FF1EDBB1B44BEF58D7CB94EAFA58655941A57990E490BD905F7F1BB77AF14C7";
     public const string LosAeLevel100SingleTargetSha256 =
         "9871D1D5C5BA1B280CFAB1278622B7B97637FC1E1B5FF5BB3A7FDB60FA14A61D";
+    public const string LosAeLevel90SingleTargetSha256 =
+        "5BA6987888A057224F2CBC11B71A3A6185CA8640BE95D360793D77048068E58D";
     public const string LosAeTransposeSha256 =
         "F87155A138C95B561B54BC0575DDFFC21014FBC865021AA379D5CC65004F8C83";
     public const string LosAeSwiftcastSha256 =
@@ -23,7 +25,7 @@ public static class Level100ResolverEngine
     public const string LosAeManafontSha256 =
         "1F2102220502B790F62563F536F428C09A8DEADCDFA4C7C0EFA05929B6C70ACE";
     public const string FrozenManifestSha256 =
-        "5E65AC53A02F219A230B091E6E4DFF39A5B812DF706474BD7BFC5EEBA487ABE7";
+        "85F6EB99AC19CA990720AE84A710E53F0E761C8AE0EA08732E149D8F34632E8D";
 
     public static ImmutableArray<BlmResolverManifestEntry> Manifest { get; } =
     [
@@ -43,7 +45,7 @@ public static class Level100ResolverEngine
         Reject(13, BlmResolverChannel.Gcd, "GCD.群体35_49"),
         Reject(14, BlmResolverChannel.Gcd, "GCD.群体1_34"),
         Entry(15, BlmResolverChannel.Gcd, "GCD.单体100"),
-        Reject(16, BlmResolverChannel.Gcd, "GCD.单体90_99"),
+        Entry(16, BlmResolverChannel.Gcd, "GCD.单体90_99"),
         Reject(17, BlmResolverChannel.Gcd, "GCD.单体72_89"),
         Reject(18, BlmResolverChannel.Gcd, "GCD.单体60_71"),
         Reject(19, BlmResolverChannel.Gcd, "GCD.单体35_59"),
@@ -82,7 +84,7 @@ public static class Level100ResolverEngine
         ArgumentNullException.ThrowIfNull(input);
         if (!IsEligible(input))
         {
-            return CreateFrame(input, null, null, null, false);
+            return CreateFrame(input, null, null, null, false, false);
         }
 
         var gcdCandidate = EvaluateChannel(input, BlmResolverChannel.Gcd);
@@ -90,12 +92,18 @@ public static class Level100ResolverEngine
         var offGcdCandidate = EvaluateChannel(input, BlmResolverChannel.OffGcd);
         var holdGcdForTranspose =
             Level100AbilityResolvers.ShouldHoldGcdForTranspose(input);
+        var bridgeManafontThroughAlways =
+            Level100AbilityResolvers.ShouldBridgeManafontThroughAlways(
+                input,
+                gcdCandidate,
+                offGcdCandidate);
         return CreateFrame(
             input,
             gcdCandidate,
             alwaysCandidate,
             offGcdCandidate,
-            holdGcdForTranspose);
+            holdGcdForTranspose,
+            bridgeManafontThroughAlways);
     }
 
     public static bool IsEligible(BlmResolverInput input)
@@ -104,7 +112,7 @@ public static class Level100ResolverEngine
         var context = input.Context;
         return context.IsAvailable
             && context.AcrEnabled
-            && context.Level == 100
+            && context.Level is >= 90 and <= 100
             && context.InCombat
             && context.IsAlive
             && context.CanAct
@@ -119,7 +127,8 @@ public static class Level100ResolverEngine
         BlmResolverCandidate? gcdCandidate,
         BlmResolverCandidate? alwaysCandidate,
         BlmResolverCandidate? offGcdCandidate,
-        bool holdGcdForTranspose)
+        bool holdGcdForTranspose,
+        bool bridgeManafontThroughAlways)
     {
         ArgumentNullException.ThrowIfNull(input);
         var previousGcd = input.PreviousGcd;
@@ -150,8 +159,12 @@ public static class Level100ResolverEngine
             GcdCandidate = gcdCandidate,
             AlwaysCandidate = alwaysCandidate,
             OffGcdCandidate = offGcdCandidate,
+            AlwaysBridgeCandidate = bridgeManafontThroughAlways
+                ? offGcdCandidate
+                : null,
             HoldGcdForTranspose = holdGcdForTranspose,
             GcdBlockedByTransposeHold = gcdBlockedByTransposeHold,
+            GcdBlockedByAlwaysBridge = bridgeManafontThroughAlways,
             ExecutorWeaveSlots = executorWeaveSlots,
             ResolverAllowedWeaves = resolverAllowedWeaves,
             RemainingWeaves = remainingWeaves,
@@ -173,7 +186,9 @@ public static class Level100ResolverEngine
             }
 
             var result = channel == BlmResolverChannel.Gcd
-                ? Level100SingleTargetResolvers.Evaluate(entry.ResolverId, input)
+                ? entry.ResolverId == "GCD.单体90_99"
+                    ? Level90SingleTargetResolvers.Evaluate(input)
+                    : Level100SingleTargetResolvers.Evaluate(entry.ResolverId, input)
                 : Level100AbilityResolvers.Evaluate(entry.ResolverId, input);
             if (!result.IsAccepted)
             {
@@ -200,7 +215,7 @@ public static class Level100ResolverEngine
         var context = input.Context;
         if (!context.IsAvailable
             || !context.AcrEnabled
-            || context.Level != 100
+            || context.Level is < 90 or > 100
             || !context.InCombat
             || !context.IsAlive
             || !context.CanAct

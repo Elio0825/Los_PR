@@ -67,7 +67,7 @@ public sealed record BlmUiSnapshot
     public string LastResetReason { get; init; } = "初始化";
     public bool IsFactLayerConnected => StateGeneration > 0;
     public bool IsDecisionEngineConnected => true;
-    public string DecisionStatus => "100级标准单体 Resolver 已接管生产入口";
+    public string DecisionStatus => "90–100级标准单体 Resolver 已接管生产入口";
 
     public string PhaseLabel => InAstralFire
         ? $"AF {AstralFireStacks}"

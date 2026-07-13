@@ -221,6 +221,18 @@ internal static class Phase3FactAdapterTests
             BLMSkill.炽炎,
             Level100ResolverEngine.Evaluate(input).GcdCandidate!.ActionId,
             "六火四后的魔泉扩展火段必须重新进入炽炎分支");
+        var level90Frame = Level100ResolverEngine.Evaluate(input with
+        {
+            Context = input.Context with { Level = 90 },
+        });
+        AssertEx.Equal(
+            BLMSkill.炽炎,
+            level90Frame.GcdCandidate!.ActionId,
+            "90级Manafont后必须使用Fire4CountSinceManafont续火");
+        AssertEx.Equal(
+            "GCD.单体90_99",
+            level90Frame.GcdCandidate.ResolverId,
+            "90级Manafont后必须进入90级主循环");
     }
 
     private static void RuntimeMemoryUsesPreviousGcdAndResets()

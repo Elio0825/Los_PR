@@ -152,7 +152,8 @@ public sealed class BlmResolverExecutionService
             }
 
             if (channel == BlmResolverChannel.Gcd
-                && frame.Decision.GcdBlockedByTransposeHold)
+                && (frame.Decision.GcdBlockedByTransposeHold
+                    || frame.Decision.GcdBlockedByAlwaysBridge))
             {
                 return null;
             }
@@ -160,6 +161,7 @@ public sealed class BlmResolverExecutionService
             if (channel == BlmResolverChannel.OffGcd
                 && (frame.Decision.HoldGcdForTranspose
                     || frame.Decision.AlwaysCandidate is not null
+                    || frame.Decision.AlwaysBridgeCandidate is not null
                     || frame.Decision.RemainingWeaves <= 0
                     || !CanDeliverOffGcd(context)))
             {
@@ -292,7 +294,8 @@ public sealed class BlmResolverExecutionService
         => channel switch
         {
             BlmResolverChannel.Gcd => decision.GcdCandidate,
-            BlmResolverChannel.Always => decision.AlwaysCandidate,
+            BlmResolverChannel.Always => decision.AlwaysCandidate
+                ?? decision.AlwaysBridgeCandidate,
             BlmResolverChannel.OffGcd => decision.OffGcdCandidate,
             _ => null,
         };
@@ -336,6 +339,7 @@ public sealed class BlmResolverExecutionService
                     CheckCode = candidate?.CheckCode ?? 0,
                     HoldGcdForTranspose = frame.Decision.HoldGcdForTranspose,
                     GcdBlockedByTransposeHold = frame.Decision.GcdBlockedByTransposeHold,
+                    GcdBlockedByAlwaysBridge = frame.Decision.GcdBlockedByAlwaysBridge,
                     DeliveryBlocked = blocked,
                     BlockReason = frame.Decision.BlockReason,
                     HighPriorityQueueActive = frame.Input.HighPriorityQueueActive,
@@ -354,10 +358,12 @@ public sealed class BlmResolverExecutionService
         BlmContext context)
         => frame.Decision.DeliveryBlocked
             || channel == BlmResolverChannel.Gcd
-                && frame.Decision.GcdBlockedByTransposeHold
+                && (frame.Decision.GcdBlockedByTransposeHold
+                    || frame.Decision.GcdBlockedByAlwaysBridge)
             || channel == BlmResolverChannel.OffGcd
                 && (frame.Decision.HoldGcdForTranspose
                     || frame.Decision.AlwaysCandidate is not null
+                    || frame.Decision.AlwaysBridgeCandidate is not null
                     || frame.Decision.RemainingWeaves <= 0
                     || !CanDeliverOffGcd(context))
             || channel == BlmResolverChannel.Always
@@ -384,8 +390,10 @@ public sealed class BlmResolverExecutionService
             CandidateFingerprint(frame.Decision.GcdCandidate),
             CandidateFingerprint(frame.Decision.AlwaysCandidate),
             CandidateFingerprint(frame.Decision.OffGcdCandidate),
+            CandidateFingerprint(frame.Decision.AlwaysBridgeCandidate),
             frame.Decision.HoldGcdForTranspose,
             frame.Decision.GcdBlockedByTransposeHold,
+            frame.Decision.GcdBlockedByAlwaysBridge,
             frame.Decision.RemainingWeaves,
             frame.Decision.DeliveryBlocked,
             frame.Decision.BlockReason,

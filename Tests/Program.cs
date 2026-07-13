@@ -8,6 +8,7 @@ internal static class Program
         {
             ("决策原语与 Ack 历史", DecisionPrimitiveTests.RunAll),
             ("100级单体 Resolver 行为闭包", Level100ResolverParityTests.Run),
+            ("90–99级单体 Resolver 行为闭包", Level90ResolverParityTests.RunAll),
             ("生产事实适配器", Phase3FactAdapterTests.RunAll),
             ("3B Resolver 生产执行器", ResolverExecutionTests.RunAll),
             ("Tracker 生命周期与 Manafont 对账", TrackerProductionTests.RunAll),

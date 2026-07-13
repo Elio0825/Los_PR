@@ -255,8 +255,10 @@ public sealed record BlmDecisionFrame
     public BlmResolverCandidate? GcdCandidate { get; init; }
     public BlmResolverCandidate? AlwaysCandidate { get; init; }
     public BlmResolverCandidate? OffGcdCandidate { get; init; }
+    public BlmResolverCandidate? AlwaysBridgeCandidate { get; init; }
     public bool HoldGcdForTranspose { get; init; }
     public bool GcdBlockedByTransposeHold { get; init; }
+    public bool GcdBlockedByAlwaysBridge { get; init; }
     public int ExecutorWeaveSlots { get; init; }
     public int ResolverAllowedWeaves { get; init; }
     public int RemainingWeaves { get; init; }

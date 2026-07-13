@@ -33,6 +33,7 @@ public sealed record BlmDebugResolverSnapshot
     public int CheckCode { get; init; }
     public bool HoldGcdForTranspose { get; init; }
     public bool GcdBlockedByTransposeHold { get; init; }
+    public bool GcdBlockedByAlwaysBridge { get; init; }
     public bool DeliveryBlocked { get; init; }
     public string BlockReason { get; init; } = string.Empty;
     public bool HighPriorityQueueActive { get; init; }
@@ -54,6 +55,7 @@ public sealed record BlmDebugResolverDraft
     public int CheckCode { get; init; }
     public bool HoldGcdForTranspose { get; init; }
     public bool GcdBlockedByTransposeHold { get; init; }
+    public bool GcdBlockedByAlwaysBridge { get; init; }
     public bool DeliveryBlocked { get; init; }
     public string BlockReason { get; init; } = string.Empty;
     public bool HighPriorityQueueActive { get; init; }

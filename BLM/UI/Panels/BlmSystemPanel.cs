@@ -304,7 +304,7 @@ public static class BlmSystemPanel
                 ImGui.Dummy(new Vector2(0f, 6f * scale));
                 LosComponents.KeyValueRow(
                     "决策核心",
-                    "Level 100 Resolver",
+                    "90–100级标准单体 Resolver",
                     scale);
                 LosComponents.KeyValueRow(
                     "通用 Pending",
