@@ -16,6 +16,14 @@ public static class Level100ResolverEngine
         "9871D1D5C5BA1B280CFAB1278622B7B97637FC1E1B5FF5BB3A7FDB60FA14A61D";
     public const string LosAeLevel90SingleTargetSha256 =
         "5BA6987888A057224F2CBC11B71A3A6185CA8640BE95D360793D77048068E58D";
+    public const string LosAeLevel72SingleTargetSha256 =
+        "1C0CFAD8A08805152ACB09A0D57F6B99B82839B054BCF1589AC3CED61726371B";
+    public const string LosAeLevel60SingleTargetSha256 =
+        "9A9BA4E0754528688DB8BDDD6D0EB20F2040C614274944526BD8EA65AE3F7649";
+    public const string LosAeLevel35SingleTargetSha256 =
+        "D05DE5AA2D38DD1ACFA26D7187DAAB93DAEA2432F975F9DF348EF4E3F3C1F06F";
+    public const string LosAeLevel1SingleTargetSha256 =
+        "3349A6E1E3763ADB929BAE2B3E9B7B315A93A26AF008D9E697A368F6158769B3";
     public const string LosAeTransposeSha256 =
         "F87155A138C95B561B54BC0575DDFFC21014FBC865021AA379D5CC65004F8C83";
     public const string LosAeSwiftcastSha256 =
@@ -25,7 +33,7 @@ public static class Level100ResolverEngine
     public const string LosAeManafontSha256 =
         "1F2102220502B790F62563F536F428C09A8DEADCDFA4C7C0EFA05929B6C70ACE";
     public const string FrozenManifestSha256 =
-        "85F6EB99AC19CA990720AE84A710E53F0E761C8AE0EA08732E149D8F34632E8D";
+        "F349964AE903890E5E788E6242A0425CD6A41CCC93208820CBB6C8D2DDE3DB6A";
 
     public static ImmutableArray<BlmResolverManifestEntry> Manifest { get; } =
     [
@@ -46,10 +54,10 @@ public static class Level100ResolverEngine
         Reject(14, BlmResolverChannel.Gcd, "GCD.群体1_34"),
         Entry(15, BlmResolverChannel.Gcd, "GCD.单体100"),
         Entry(16, BlmResolverChannel.Gcd, "GCD.单体90_99"),
-        Reject(17, BlmResolverChannel.Gcd, "GCD.单体72_89"),
-        Reject(18, BlmResolverChannel.Gcd, "GCD.单体60_71"),
-        Reject(19, BlmResolverChannel.Gcd, "GCD.单体35_59"),
-        Reject(20, BlmResolverChannel.Gcd, "GCD.单体1_34"),
+        Entry(17, BlmResolverChannel.Gcd, "GCD.单体72_89"),
+        Entry(18, BlmResolverChannel.Gcd, "GCD.单体60_71"),
+        Entry(19, BlmResolverChannel.Gcd, "GCD.单体35_59"),
+        Entry(20, BlmResolverChannel.Gcd, "GCD.单体1_34"),
         Inactive(21, BlmResolverChannel.Gcd, "GCD.核爆补耀星"),
         Entry(22, BlmResolverChannel.Always, "Ability.星灵移位"),
         Entry(23, BlmResolverChannel.OffGcd, "Ability.即刻"),
@@ -112,7 +120,7 @@ public static class Level100ResolverEngine
         var context = input.Context;
         return context.IsAvailable
             && context.AcrEnabled
-            && context.Level is >= 90 and <= 100
+            && context.Level is >= 1 and <= 100
             && context.InCombat
             && context.IsAlive
             && context.CanAct
@@ -186,9 +194,7 @@ public static class Level100ResolverEngine
             }
 
             var result = channel == BlmResolverChannel.Gcd
-                ? entry.ResolverId == "GCD.单体90_99"
-                    ? Level90SingleTargetResolvers.Evaluate(input)
-                    : Level100SingleTargetResolvers.Evaluate(entry.ResolverId, input)
+                ? Level100SingleTargetResolvers.Evaluate(entry.ResolverId, input)
                 : Level100AbilityResolvers.Evaluate(entry.ResolverId, input);
             if (!result.IsAccepted)
             {
@@ -215,7 +221,7 @@ public static class Level100ResolverEngine
         var context = input.Context;
         if (!context.IsAvailable
             || !context.AcrEnabled
-            || context.Level is < 90 or > 100
+            || context.Level is < 1 or > 100
             || !context.InCombat
             || !context.IsAlive
             || !context.CanAct

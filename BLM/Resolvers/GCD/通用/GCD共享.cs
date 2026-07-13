@@ -50,4 +50,13 @@ internal static partial class Level100SingleTargetResolvers
             checkCode,
             input.Context.CurrentTargetId,
             BlmResolverTargetKind.CurrentTarget);
+
+    private static long FireSpellMpCost(
+        BlmResolverContextFacts context,
+        int baseCost)
+        => context.InFire
+            && context.AstralFireStacks > 0
+            && context.UmbralHearts == 0
+                ? baseCost * 2L
+                : baseCost;
 }

@@ -201,8 +201,11 @@ public sealed record BlmContext
                 : 0;
             var aoeEnabled = ReadQt("AOE");
             var smartAoeEnabled = ReadQt("智能AOE");
-            var isAoeMode = aoeEnabled
-                && (smartAoeEnabled ? enemyCount >= 2 : enemyCount >= 3);
+            var isAoeMode = ShouldUseAoeMode(
+                level,
+                enemyCount,
+                aoeEnabled,
+                smartAoeEnabled);
             var hasLeyLinesStatus737 = me.HasStatus(BlmBuff.黑魔纹);
             var hasLeyLinesHaste = me.HasStatus(BlmBuff.咏速);
 
@@ -295,6 +298,25 @@ public sealed record BlmContext
                 CaptureError = $"{exception.GetType().Name}: {exception.Message}",
             };
         }
+    }
+
+    internal static bool ShouldUseAoeMode(
+        int level,
+        int enemyCount,
+        bool aoeEnabled,
+        bool smartAoeEnabled)
+    {
+        if (!aoeEnabled)
+        {
+            return false;
+        }
+
+        if (smartAoeEnabled && level >= 58 && enemyCount >= 2)
+        {
+            return true;
+        }
+
+        return level >= 12 && enemyCount >= 3;
     }
 
     public static int CountEnemiesAroundTarget(

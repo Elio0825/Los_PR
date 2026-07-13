@@ -107,6 +107,7 @@ internal static class Phase3FactAdapterTests
         AssertEx.Equal(generation, input.StateGeneration, "输入必须显式携带 Tracker generation");
         AssertEx.True(input.Context.HasLeyLinesStatus737, "737 应独立投影");
         AssertEx.False(input.Context.HasLeyLinesHaste738, "738 不得由合并 HasLeyLines 推断");
+        AssertEx.Equal(3, input.Context.MaxPolyglotStacks, "通晓等级上限事实未投影");
         AssertEx.Equal(4, input.Level100Loop.Fire4Count, "火四计数必须来自 Tracker");
         AssertEx.True(input.Level100Loop.FireParadoxUsed, "火悖论事实必须来自 Tracker");
         AssertEx.True(input.HighPriorityQueueActive, "高优队列事实未投影");

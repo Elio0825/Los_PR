@@ -16,12 +16,23 @@ internal static partial class Level100AbilityResolvers
             return BlmResolverCheckResult.Reject(-1);
         }
 
+        var level = input.Context.Level;
+        if (level < 18)
+        {
+            return BlmResolverCheckResult.Reject(-80);
+        }
+
+        if (level < 90 && input.Settings.TtkEnabled)
+        {
+            return Self(input, MageUniversalSkill.即刻咏唱, 999);
+        }
+
         if (input.Context.HasInstantCast)
         {
             return BlmResolverCheckResult.Reject(-3);
         }
 
-        if (input.Context.Level < 50)
+        if (level < 50)
         {
             return BlmResolverCheckResult.Reject(-80);
         }

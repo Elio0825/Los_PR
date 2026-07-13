@@ -20,12 +20,16 @@ internal static partial class Level100AbilityResolvers
             return BlmResolverCheckResult.Reject(-1);
         }
 
-        if (context.PolyglotStacks == 3)
+        var maxPolyglotStacks = context.MaxPolyglotStacks > 0
+            ? context.MaxPolyglotStacks
+            : context.Level >= 98 ? 3 : 2;
+        if (context.PolyglotStacks >= maxPolyglotStacks)
         {
             return BlmResolverCheckResult.Reject(-2);
         }
 
-        if (context.PolyglotStacks == 2 && context.PolyglotTimerMs < 4000)
+        if (context.PolyglotStacks == maxPolyglotStacks - 1
+            && context.PolyglotTimerMs < 4000)
         {
             return BlmResolverCheckResult.Reject(-3);
         }

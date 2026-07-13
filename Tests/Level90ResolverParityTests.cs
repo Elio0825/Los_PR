@@ -38,22 +38,25 @@ internal static class Level90ResolverParityTests
             Level100ResolverEngine.LosAeBlmAcrSha256,
             "90级注册顺序源哈希必须冻结");
         AssertEx.Equal(
-            "85F6EB99AC19CA990720AE84A710E53F0E761C8AE0EA08732E149D8F34632E8D",
+            "F349964AE903890E5E788E6242A0425CD6A41CCC93208820CBB6C8D2DDE3DB6A",
             Level100ResolverEngine.FrozenManifestSha256,
-            "4A manifest 哈希合同错误");
+            "4B manifest 哈希合同错误");
         AssertEx.Equal(
             Level100ResolverEngine.FrozenManifestSha256,
             Level100ResolverEngine.ManifestSha256,
-            "4A manifest 规范化哈希不匹配");
+            "4B manifest 规范化哈希不匹配");
         AssertEx.Equal(
             BlmResolverManifestDisposition.Active,
             Level100ResolverEngine.Manifest[16].Disposition,
             "order 16 的90级单体Resolver必须激活");
 
         var input = BaseInput();
-        var level89 = Evaluate(input, input.Context with { Level = 89 });
-        AssertEx.True(level89.GcdCandidate is null, "89级必须保持 fail closed");
-        AssertEx.True(level89.DeliveryBlocked, "89级必须被生命周期等级Gate阻断");
+        AssertGcd(
+            Evaluate(input, input.Context with { Level = 89 }),
+            BLMSkill.炽炎,
+            "GCD.单体72_89",
+            17,
+            "89级边界");
 
         AssertGcd(
             Evaluate(input, input.Context with { Level = 90 }),

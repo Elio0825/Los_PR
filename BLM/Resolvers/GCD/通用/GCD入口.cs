@@ -15,6 +15,11 @@ internal static partial class Level100SingleTargetResolvers
             "GCD.雷1" => CheckThunder(input),
             "GCD.瞬发gcd触发器" => CheckInstantGcdTrigger(input),
             "GCD.单体100" => CheckLevel100SingleTarget(input),
+            "GCD.单体90_99" => Level90SingleTargetResolvers.Evaluate(input),
+            "GCD.单体72_89" => CheckLevel72SingleTarget(input),
+            "GCD.单体60_71" => CheckLevel60SingleTarget(input),
+            "GCD.单体35_59" => CheckLevel35SingleTarget(input),
+            "GCD.单体1_34" => CheckLevel1SingleTarget(input),
             _ => BlmResolverCheckResult.Reject(-999),
         };
 }

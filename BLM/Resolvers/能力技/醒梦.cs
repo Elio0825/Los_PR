@@ -4,8 +4,9 @@ internal static partial class Level100AbilityResolvers
 {
     private static BlmResolverCheckResult CheckLucidDreaming(BlmResolverInput input)
     {
-        var lucid = Level100ResolverFacts.Action(input, MageUniversalSkill.醒梦);
-        if (lucid is null || lucid.CooldownRemainMs > 0d)
+        if (!Level100ResolverFacts.IsReadyWithCanCast(
+                input,
+                MageUniversalSkill.醒梦))
         {
             return BlmResolverCheckResult.Reject(-1);
         }

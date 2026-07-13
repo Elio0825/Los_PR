@@ -21,6 +21,8 @@ internal static class ResolverExecutionTests
         ManualRecoveryAlwaysWorksWithoutPreviousGcd();
         IceParadoxTriplecastBlizzard3SequenceIsDeliverable();
         Level90CandidateIsDeliveredInProduction();
+        Level1To89CandidatesAreDeliveredInProduction();
+        Level60IceAckAheadOfGaugeDeliversBlizzardFour();
     }
 
     private static void SameFrameAndPendingPreventDuplicateDelivery()
@@ -540,6 +542,89 @@ internal static class ResolverExecutionTests
             fixture.Context.TargetEntityId);
     }
 
+    private static void Level1To89CandidatesAreDeliveredInProduction()
+    {
+        var boundaries = new[]
+        {
+            (Level: 1, Action: BLMSkill.火炎, Resolver: "GCD.单体1_34", Order: 20),
+            (Level: 34, Action: BLMSkill.火炎, Resolver: "GCD.单体1_34", Order: 20),
+            (Level: 35, Action: BLMSkill.火炎, Resolver: "GCD.单体35_59", Order: 19),
+            (Level: 59, Action: BLMSkill.火炎, Resolver: "GCD.单体35_59", Order: 19),
+            (Level: 60, Action: BLMSkill.炽炎, Resolver: "GCD.单体60_71", Order: 18),
+            (Level: 71, Action: BLMSkill.炽炎, Resolver: "GCD.单体60_71", Order: 18),
+            (Level: 72, Action: BLMSkill.炽炎, Resolver: "GCD.单体72_89", Order: 17),
+            (Level: 89, Action: BLMSkill.炽炎, Resolver: "GCD.单体72_89", Order: 17),
+        };
+        foreach (var boundary in boundaries)
+        {
+            var fixture = CreateFixture(FireContext() with { Level = boundary.Level });
+            var input = Input(
+                fixture.Context,
+                BlmResolverSettings.Default with
+                {
+                    ManafontEnabled = false,
+                    DotEnabled = false,
+                    MoveXenoglossyEnabled = false,
+                    AmplifierEnabled = false,
+                    LeyLinesEnabled = false,
+                    AutoMitigationEnabled = false,
+                },
+                [Ready(boundary.Action)]);
+            AssertEx.True(
+                fixture.Execution.BeginFrame(fixture.Context, input),
+                $"{boundary.Level}级生产帧应建立");
+            var candidate = fixture.Execution.GetSnapshot()!.Decision.GcdCandidate;
+            AssertEx.True(candidate is not null, $"{boundary.Level}级生产帧必须产生GCD候选");
+            AssertEx.Equal(boundary.Action, candidate!.ActionId, $"{boundary.Level}级生产候选动作错误");
+            AssertEx.Equal(boundary.Resolver, candidate.ResolverId, $"{boundary.Level}级生产候选Resolver错误");
+            AssertEx.Equal(boundary.Order, candidate.ManifestOrder, $"{boundary.Level}级生产候选manifest顺序错误");
+            AssertAction(
+                fixture.Execution.Resolve(BlmResolverChannel.Gcd, fixture.Context),
+                boundary.Action,
+                ActionType.Gcd,
+                fixture.Context.TargetEntityId);
+        }
+    }
+
+    private static void Level60IceAckAheadOfGaugeDeliversBlizzardFour()
+    {
+        var context = TestContext.Base() with
+        {
+            Level = 60,
+            Phase = BlmPhase.Ice,
+            AfStacks = 0,
+            IceStacks = 1,
+            UmbralHearts = 2,
+            GcdRemainSeconds = 0.2f,
+        };
+        var fixture = CreateFixture(context);
+        var previous = Success(
+            fixture.Context.Tracker.StateGeneration,
+            BLMSkill.冰封,
+            wasInstant: false);
+        var input = Input(
+            fixture.Context,
+            BlmResolverSettings.Default with
+            {
+                ManafontEnabled = false,
+                DotEnabled = false,
+                MoveXenoglossyEnabled = false,
+                AmplifierEnabled = false,
+                LeyLinesEnabled = false,
+                AutoMitigationEnabled = false,
+            },
+            [Ready(BLMSkill.冰澈)],
+            previous);
+        AssertEx.True(
+            fixture.Execution.BeginFrame(fixture.Context, input),
+            "60级冰封Ack领先Gauge生产帧应建立");
+        AssertAction(
+            fixture.Execution.Resolve(BlmResolverChannel.Gcd, fixture.Context),
+            BLMSkill.冰澈,
+            ActionType.Gcd,
+            fixture.Context.TargetEntityId);
+    }
+
     private static Fixture CreateFixture(BlmContext context)
     {
         var clock = new FakeClock(context.CapturedAtMs);
@@ -617,6 +702,7 @@ internal static class ResolverExecutionTests
                 HasFirestarter = context.HasFirestarter,
                 HasThunderhead = context.HasThunderhead,
                 PolyglotStacks = context.PolyglotStacks,
+                MaxPolyglotStacks = context.MaxPolyglot,
                 PolyglotTimerMs = context.PolyglotTimerMs,
                 HasSwiftcast = context.HasSwiftcast,
                 TriplecastStacks = context.TriplecastStacks,

@@ -197,7 +197,7 @@ internal static class Level100ResolverParityTests
         {
             input.Context with { IsAvailable = false },
             input.Context with { AcrEnabled = false },
-            input.Context with { Level = 89 },
+            input.Context with { Level = 0 },
             input.Context with { InCombat = false },
             input.Context with { IsAlive = false },
             input.Context with { CanAct = false },

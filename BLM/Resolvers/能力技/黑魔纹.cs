@@ -10,6 +10,12 @@ internal static partial class Level100AbilityResolvers
             return BlmResolverCheckResult.Reject(-80);
         }
 
+        // 4B 尚无可靠的日常副本/TTK事实；低等级单层黑魔纹生产保守关闭。
+        if (context.Level < 90)
+        {
+            return BlmResolverCheckResult.Reject(-89);
+        }
+
         if (!input.Settings.LeyLinesEnabled)
         {
             return BlmResolverCheckResult.Reject(-5);
@@ -26,12 +32,14 @@ internal static partial class Level100AbilityResolvers
         }
 
         var leyLines = Level100ResolverFacts.Action(input, BLMSkill.黑魔纹);
-        if (leyLines is null)
+        if (leyLines is not { IsUnlocked: true, CanCast: true })
         {
             return BlmResolverCheckResult.Reject(-3);
         }
 
-        if (leyLines.Charges < 1f)
+        if (leyLines.Charges < 1f
+            && leyLines.CooldownRemainMs
+                > BlmDecisionPrimitives.AeAssistAbilityQueueToleranceMs)
         {
             return BlmResolverCheckResult.Reject(-1);
         }

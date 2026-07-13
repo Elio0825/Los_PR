@@ -78,16 +78,19 @@ internal static partial class Level100AbilityResolvers
             return false;
         }
 
-        if (gcdCandidate is not
-            {
-                ResolverId: "GCD.单体100" or "GCD.单体90_99",
-            })
+        if (gcdCandidate is null
+            || !gcdCandidate.ResolverId.StartsWith(
+                "GCD.单体",
+                StringComparison.Ordinal))
         {
             return false;
         }
 
+        var iceReturnAction = input.Context.Level < 35
+            ? BLMSkill.冰结
+            : BLMSkill.冰封;
         if (gcdCandidate.ActionId
-            != Level100ResolverFacts.EffectiveActionId(input, BLMSkill.冰封))
+            != Level100ResolverFacts.EffectiveActionId(input, iceReturnAction))
         {
             return false;
         }

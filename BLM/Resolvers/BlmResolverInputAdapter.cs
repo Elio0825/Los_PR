@@ -184,6 +184,7 @@ public sealed class BlmResolverInputAdapter
             HasFirestarter = context.HasFirestarter,
             HasThunderhead = context.HasThunderhead,
             PolyglotStacks = context.PolyglotStacks,
+            MaxPolyglotStacks = context.MaxPolyglot,
             PolyglotTimerMs = context.PolyglotTimerMs,
             HasSwiftcast = context.HasSwiftcast,
             TriplecastStacks = context.TriplecastStacks,

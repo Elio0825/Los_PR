@@ -113,6 +113,7 @@ public sealed record BlmResolverContextFacts
     public bool HasFirestarter { get; init; }
     public bool HasThunderhead { get; init; }
     public int PolyglotStacks { get; init; }
+    public int MaxPolyglotStacks { get; init; }
     public int PolyglotTimerMs { get; init; }
     public bool HasSwiftcast { get; init; }
     public int TriplecastStacks { get; init; }
