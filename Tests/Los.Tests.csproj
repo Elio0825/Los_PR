@@ -7,7 +7,7 @@
     <Nullable>enable</Nullable>
     <LangVersion>latest</LangVersion>
     <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
-    <PromeRotationDir>C:\Users\Administrator\AppData\Roaming\XIVLauncherCN\installedPlugins\PromeRotation\1.5.2.3</PromeRotationDir>
+    <PromeRotationDir>C:\Users\Administrator\AppData\Roaming\XIVLauncherCN\installedPlugins\PromeRotation\1.5.5.2</PromeRotationDir>
     <DalamudHooksDir>C:\Users\Administrator\AppData\Roaming\XIVLauncherCN\addon\Hooks\26-06-27-01</DalamudHooksDir>
   </PropertyGroup>
 

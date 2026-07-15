@@ -6,7 +6,12 @@ using PromeRotation.Timeline.Core;
 
 namespace LosPr.BLM;
 
-[RotationMetadata(25u, "Los 黑魔ACR", "Los", "0.1.0")]
+[RotationMetadata(
+    25u,
+    "Los 黑魔ACR",
+    "Los",
+    "0.1.0",
+    ContentScope = AcrContentScope.All)]
 public sealed class BlackMageRotation : IRotation, IRotationMeta, IRotationLifecycle, IDisposable
 {
     private const string LegacyNativeOpenerProbeQtName = "DEV起手探针";

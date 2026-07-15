@@ -22,6 +22,7 @@ internal static class PublicApiTests
             .GetCustomAttributes(typeof(RotationMetadataAttribute), inherit: false)
             .Single();
         AssertEx.Equal("Los 黑魔ACR", metadata.RotationName, "PR 中显示的 ACR 名称错误");
+        AssertEx.Equal(AcrContentScope.All, metadata.ContentScope, "Los 必须声明同时支持日常和高难");
 
         var actual = typeof(BlackMageRotation).Assembly
             .GetExportedTypes()

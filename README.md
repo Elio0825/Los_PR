@@ -67,6 +67,15 @@ dotnet run --project .\Tests\Los.Tests.csproj -c Release --no-build `
 
 当前测试覆盖 17 个测试组，包括多等级单体/AOE Resolver、Tracker 生命周期、起手恢复、时间轴、爆发药 Hotkey、快捷键持久化、Debug 日志和 DLL 公共 API 边界。
 
+生成 PR 下载中心所需的 `latest.zip` 和 `repo.json`：
+
+```powershell
+.\scripts\New-AcrRelease.ps1 `
+  -PromeRotationDir <PromeRotation 插件目录> `
+  -DalamudHooksDir <Dalamud Hooks 目录> `
+  -Version 0.1.0
+```
+
 构建输出：
 
 ```text
@@ -103,4 +112,4 @@ Tests/             无外部测试框架的回归测试程序
 
 ## 开源许可
 
-当前仓库尚未声明开源许可证。在添加许可证前，代码默认保留全部权利。
+本项目采用 [MIT License](LICENSE) 开源。
