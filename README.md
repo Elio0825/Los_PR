@@ -67,7 +67,7 @@ dotnet run --project .\Tests\Los.Tests.csproj -c Release --no-build `
 
 当前测试覆盖 17 个测试组，包括多等级单体/AOE Resolver、Tracker 生命周期、起手恢复、时间轴、爆发药 Hotkey、快捷键持久化、Debug 日志和 DLL 公共 API 边界。
 
-生成 PR 下载中心所需的 `latest.zip` 和 `repo.json`：
+生成 PR 下载中心所需的 `Los.zip` 和 `repo.json`：
 
 ```powershell
 .\scripts\New-AcrRelease.ps1 `

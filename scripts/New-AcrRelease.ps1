@@ -77,7 +77,7 @@ if (-not [IO.Path]::IsPathRooted($OutputDirectory)) {
 }
 
 New-Item -ItemType Directory -Force -Path $OutputDirectory | Out-Null
-$zipPath = Join-Path $OutputDirectory "latest.zip"
+$zipPath = Join-Path $OutputDirectory "Los.zip"
 $manifestPath = Join-Path $OutputDirectory "repo.json"
 
 Compress-Archive -LiteralPath @($dllPath, $depsPath) -DestinationPath $zipPath -Force
@@ -98,7 +98,7 @@ $manifest = [ordered]@{
     )
     apiVersion = 15
     referencePromeVersion = $referencePromeVersion
-    downloadUrl = "https://github.com/Elio0825/Los_PR/releases/latest/download/latest.zip"
+    downloadUrl = "https://github.com/Elio0825/Los_PR/releases/latest/download/Los.zip"
     sourceRepositoryUrl = "https://github.com/Elio0825/Los_PR"
     sha256 = $sha256
 }
