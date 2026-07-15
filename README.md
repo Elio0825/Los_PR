@@ -73,7 +73,7 @@ dotnet run --project .\Tests\Los.Tests.csproj -c Release --no-build `
 .\scripts\New-AcrRelease.ps1 `
   -PromeRotationDir <PromeRotation 插件目录> `
   -DalamudHooksDir <Dalamud Hooks 目录> `
-  -Version 0.1.0
+  -Version 0.1.1
 ```
 
 构建输出：
