@@ -9,13 +9,17 @@ namespace Los.Tests;
 
 internal static class Level100OpenerTests
 {
-    private static readonly BlmOpenerPolicy EnabledWithoutPotion = new(true, false);
+    private static readonly BlmOpenerPolicy EnabledWithoutPotion = new(
+        Enabled: true,
+        HighEndPotionEnabled: false,
+        DailyInCombatEnabled: true);
 
     public static void RunAll()
     {
         FormalOpenerIsRegisteredAndDisabledByDefault();
         HighEndAndDailyShareTheFrozenFivePlusSevenContract();
         DailyWaitsForCombatAndCompletesFivePlusSevenWithoutPotion();
+        DailyRequiresDailyPresetAndSinglePartyEightPlayerDuty();
         CountdownFireThreeBridgesBeforeInCombatAndRebindsGeneration();
         MissingAckCancelsInsteadOfSkippingTheStep();
         TargetModeAndManualOverrideCancelTheWholeSequence();
@@ -56,6 +60,17 @@ internal static class Level100OpenerTests
         AssertEx.False(
             BlackMageRotation.QtList.ContainsKey("高难起手爆发药"),
             "起手药水不得继续占用QT");
+
+        settings.OpenerSelection = BlmOpenerSelection.Standard57;
+        BlackMageRotation.ApplyModeDefaults(settings, BlmConsoleMode.Daily);
+        var dailyPolicy = BlackMageRotation.CreateOpenerPolicy(settings);
+        AssertEx.True(dailyPolicy.DailyInCombatEnabled, "日常预设必须允许八人本无倒计时起手");
+        AssertEx.False(dailyPolicy.HighEndCountdownEnabled, "日常预设不得武装高难倒计时起手");
+
+        BlackMageRotation.ApplyModeDefaults(settings, BlmConsoleMode.HighEnd);
+        var highEndPolicy = BlackMageRotation.CreateOpenerPolicy(settings);
+        AssertEx.False(highEndPolicy.DailyInCombatEnabled, "高难预设不得回落到无倒计时日常起手");
+        AssertEx.True(highEndPolicy.HighEndCountdownEnabled, "高难预设必须允许倒计时起手");
         AssertEx.True(
             BlackMageRotation.Openers.TryGetValue(BlmLevel100Opener.Name, out var openerType),
             "PR 起手注册表必须包含正式5+7适配器");
@@ -160,6 +175,63 @@ internal static class Level100OpenerTests
         AssertEx.False(snapshot.OwnsExecution, "日常起手完成后必须交还标准Resolver");
         AssertEx.Equal(5, snapshot.Fire4BeforeManafont, "日常前半段炽炎确认数错误");
         AssertEx.Equal(7, snapshot.Fire4AfterManafont, "日常后半段炽炎确认数错误");
+    }
+
+    private static void DailyRequiresDailyPresetAndSinglePartyEightPlayerDuty()
+    {
+        AssertDailyStart(
+            new BlmDutyComposition(8, 1),
+            EnabledWithoutPotion,
+            expected: true,
+            "单队八人日常本必须允许无倒计时起手");
+        AssertDailyStart(
+            new BlmDutyComposition(4, 1),
+            EnabledWithoutPotion,
+            expected: false,
+            "四人迷宫不得启动日常5+7");
+        AssertDailyStart(
+            new BlmDutyComposition(8, 3),
+            EnabledWithoutPotion,
+            expected: false,
+            "24人本不得启动日常5+7");
+        AssertDailyStart(
+            default,
+            EnabledWithoutPotion,
+            expected: false,
+            "副本编制未知时不得冒险启动日常5+7");
+        AssertDailyStart(
+            new BlmDutyComposition(8, 1),
+            EnabledWithoutPotion with { DailyInCombatEnabled = false },
+            expected: false,
+            "高难预设不得回落到日常5+7");
+
+        var clock = new FakeClock();
+        var context = ReadyOpenerContext(inCombat: false);
+        var tracker = new BlmStateTracker(context, clock, IdentityBlmActionIdNormalizer.Instance);
+        var service = CreateService(tracker, clock);
+        AssertEx.False(
+            service.TryArmCountdown(
+                tracker.GetContextSnapshot(),
+                EnabledWithoutPotion with { HighEndCountdownEnabled = false },
+                potionId: 0),
+            "日常预设不得武装高难倒计时起手");
+    }
+
+    private static void AssertDailyStart(
+        BlmDutyComposition composition,
+        BlmOpenerPolicy policy,
+        bool expected,
+        string message)
+    {
+        var clock = new FakeClock();
+        var context = ReadyOpenerContext(inCombat: true) with
+        {
+            DutyComposition = composition,
+        };
+        var tracker = new BlmStateTracker(context, clock, IdentityBlmActionIdNormalizer.Instance);
+        var service = CreateService(tracker, clock);
+        service.Update(tracker.GetContextSnapshot(), false, policy, 0f);
+        AssertEx.Equal(expected, service.OwnsExecution, message);
     }
 
     private static void CountdownFireThreeBridgesBeforeInCombatAndRebindsGeneration()
@@ -906,6 +978,7 @@ internal static class Level100OpenerTests
         => TestContext.Base() with
         {
             InCombat = inCombat,
+            DutyComposition = new BlmDutyComposition(8, 1),
             Phase = BlmPhase.Neutral,
             AfStacks = 0,
             IceStacks = 0,

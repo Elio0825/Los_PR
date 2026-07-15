@@ -392,7 +392,12 @@ public sealed class BlackMageRotation : IRotation, IRotationMeta, IRotationLifec
 
     private BlmOpenerPolicy ReadOpenerPolicy()
     {
-        var settings = _settingsStore.Settings;
+        return CreateOpenerPolicy(_settingsStore.Settings);
+    }
+
+    internal static BlmOpenerPolicy CreateOpenerPolicy(BlackMageSettings settings)
+    {
+        ArgumentNullException.ThrowIfNull(settings);
         return new BlmOpenerPolicy(
             Enabled: settings.OpenerSelection == BlmOpenerSelection.Standard57,
             HighEndPotionEnabled: settings.OpenerPotionEnabled,
@@ -400,7 +405,9 @@ public sealed class BlackMageRotation : IRotation, IRotationMeta, IRotationLifec
                 BlmOpenerSelection.Level70 or BlmOpenerSelection.Level80,
             Level100FlareEnabled: settings.OpenerSelection == BlmOpenerSelection.Flare,
             Level90To99Enabled: settings.OpenerSelection == BlmOpenerSelection.Level90,
-            NoTriplecast: settings.OpenerNoTriplecast);
+            NoTriplecast: settings.OpenerNoTriplecast,
+            DailyInCombatEnabled: settings.CombatMode == BlmConsoleMode.Daily,
+            HighEndCountdownEnabled: settings.CombatMode == BlmConsoleMode.HighEnd);
     }
 
     private static IReadOnlyDictionary<string, bool> CreatePreset(bool highEnd)

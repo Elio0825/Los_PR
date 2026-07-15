@@ -67,7 +67,9 @@ internal readonly record struct BlmOpenerPolicy(
     bool Level70To89Enabled = false,
     bool Level100FlareEnabled = false,
     bool Level90To99Enabled = false,
-    bool NoTriplecast = false);
+    bool NoTriplecast = false,
+    bool DailyInCombatEnabled = false,
+    bool HighEndCountdownEnabled = true);
 
 internal sealed record BlmOpenerPlan
 {

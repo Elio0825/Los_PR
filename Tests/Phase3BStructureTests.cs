@@ -3,6 +3,7 @@ using LosPr.BLM;
 using LosPr.BLM.Core;
 using LosPr.BLM.Diagnostics;
 using LosPr.BLM.Resolvers.Production;
+using LosPr.BLM.UI;
 
 namespace Los.Tests;
 
@@ -33,6 +34,7 @@ internal static class Phase3BStructureTests
         QuickOverlayKeepsHostAndVisualContracts();
         QuickHotkeyPanelKeepsNativeIconAndGridContracts();
         FormalUiKeepsVisibilityBindingAndCompactDebugContracts();
+        OverviewTargetDiagnosticsReflectRuntimeFacts();
     }
 
     private static void RemovedGraphTypesStayDeleted()
@@ -325,6 +327,49 @@ internal static class Phase3BStructureTests
             combat.Contains("请确保 FuckAnimationLock", StringComparison.Ordinal)
             && combat.Contains("请确保 DR", StringComparison.Ordinal),
             "危险循环依赖项必须明确提示用户自行确认");
+    }
+
+    private static void OverviewTargetDiagnosticsReflectRuntimeFacts()
+    {
+        var context = TestContext.Base() with
+        {
+            DutyComposition = new BlmDutyComposition(8, 1),
+            EnemyCount = 1,
+            AoeEnabled = true,
+            SmartAoeEnabled = false,
+            IsAoeMode = false,
+        };
+        var snapshot = BlmUiSnapshot.FromContext(context);
+        AssertEx.Equal("8 人", snapshot.DutySizeLabel, "概览必须显示副本额定人数");
+        AssertEx.Equal(1, snapshot.ValidEnemyCount, "概览必须直接展示PR敌人数事实");
+        AssertEx.Equal(
+            "PR 计数 1，需要至少 3 个",
+            snapshot.AoeDecisionLabel,
+            "概览必须解释标准AOE阈值未满足");
+
+        var smartAoe = BlmUiSnapshot.FromContext(context with
+        {
+            SmartAoeEnabled = true,
+        });
+        AssertEx.Equal(
+            "PR 计数 1，需要至少 2 个",
+            smartAoe.AoeDecisionLabel,
+            "概览必须解释智能AOE阈值未满足");
+
+        var alliance = BlmUiSnapshot.FromContext(context with
+        {
+            DutyComposition = new BlmDutyComposition(8, 3),
+            EnemyCount = 3,
+            IsAoeMode = true,
+        });
+        AssertEx.Equal("24 人（3 队）", alliance.DutySizeLabel, "概览必须正确显示多队副本编制");
+        AssertEx.Equal("已进入群体路线", alliance.AoeDecisionLabel, "概览必须显示已进入AOE");
+
+        var noTarget = BlmUiSnapshot.FromContext(context with
+        {
+            HasValidTarget = false,
+        });
+        AssertEx.Equal("当前没有可攻击目标", noTarget.AoeDecisionLabel, "无目标原因显示错误");
     }
 
     private static int Count(string source, string value)

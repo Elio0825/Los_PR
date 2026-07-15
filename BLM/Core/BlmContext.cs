@@ -1,3 +1,5 @@
+using Lumina.Excel.Sheets;
+
 namespace LosPr.BLM.Core;
 
 internal sealed record BlmDotSnapshot
@@ -11,6 +13,11 @@ internal sealed record BlmDotSnapshot
 }
 
 internal readonly record struct BlmDotRule(uint StatusId, float DurationMs);
+
+internal readonly record struct BlmDutyComposition(int MembersPerParty, int PartyCount)
+{
+    public bool IsSinglePartyEightPlayer => MembersPerParty == 8 && PartyCount == 1;
+}
 
 internal sealed record BlmActionAvailability
 {
@@ -33,6 +40,10 @@ internal sealed record BlmActionAvailability
 
 internal sealed record BlmContext
 {
+    private static readonly object DutyCompositionCacheGate = new();
+    private static uint _cachedDutyTerritoryId = uint.MaxValue;
+    private static BlmDutyComposition _cachedDutyComposition;
+
     public static BlmContext Unavailable { get; } = new();
 
     public long CapturedAtMs { get; init; }
@@ -46,6 +57,7 @@ internal sealed record BlmContext
     public uint PlayerEntityId { get; init; }
     public uint JobId { get; init; }
     public int Level { get; init; }
+    public BlmDutyComposition DutyComposition { get; init; }
     public long Mp { get; init; }
     public long MaxMp { get; init; }
     public bool IsMoving { get; init; }
@@ -188,6 +200,7 @@ internal sealed record BlmContext
             }
 
             var level = me.Level;
+            var dutyComposition = ReadDutyComposition();
             var gauge = Svc.Gauges.Get<BLMGauge>();
             var phase = gauge.InAstralFire
                 ? BlmPhase.Fire
@@ -227,6 +240,7 @@ internal sealed record BlmContext
                 PlayerEntityId = me.EntityId,
                 JobId = me.ClassJob.RowId,
                 Level = level,
+                DutyComposition = dutyComposition,
                 Mp = me.CurrentMp,
                 MaxMp = me.MaxMp,
                 IsMoving = MoveManager.IsLocalPlayerMoving,
@@ -328,6 +342,45 @@ internal sealed record BlmContext
         }
 
         return level >= 12 && enemyCount >= 3;
+    }
+
+    private static BlmDutyComposition ReadDutyComposition()
+    {
+        try
+        {
+            var territoryId = Svc.ClientState.TerritoryType;
+            lock (DutyCompositionCacheGate)
+            {
+                if (_cachedDutyTerritoryId == territoryId)
+                {
+                    return _cachedDutyComposition;
+                }
+            }
+
+            var territories = Svc.Data.GetExcelSheet<TerritoryType>();
+            var composition = default(BlmDutyComposition);
+            if (territories is not null
+                && territories.TryGetRow(territoryId, out var territory)
+                && territory.ContentFinderCondition.ValueNullable is { } content
+                && content.ContentMemberType.ValueNullable is { } memberType)
+            {
+                composition = new BlmDutyComposition(
+                    memberType.MembersPerParty,
+                    memberType.PartyCount);
+            }
+
+            lock (DutyCompositionCacheGate)
+            {
+                _cachedDutyTerritoryId = territoryId;
+                _cachedDutyComposition = composition;
+            }
+
+            return composition;
+        }
+        catch
+        {
+            return default;
+        }
     }
 
     public static int CountEnemiesAroundTarget(

@@ -46,6 +46,12 @@ internal sealed record BlmUiSnapshot
     public float TargetDistance { get; init; }
     public long TargetHp { get; init; }
     public long TargetMaxHp { get; init; }
+    public int DutyMembersPerParty { get; init; }
+    public int DutyPartyCount { get; init; }
+    public int ValidEnemyCount { get; init; }
+    public bool AoeEnabled { get; init; }
+    public bool SmartAoeEnabled { get; init; }
+    public bool IsAoeMode { get; init; }
 
     public bool HistoryReliable { get; init; }
     public long CombatSerial { get; init; }
@@ -92,6 +98,47 @@ internal sealed record BlmUiSnapshot
         ? 0f
         : Math.Clamp(1f - CastRemainSeconds / CastTotalSeconds, 0f, 1f);
 
+    public string DutySizeLabel
+    {
+        get
+        {
+            if (DutyMembersPerParty <= 0 || DutyPartyCount <= 0)
+            {
+                return "非副本或暂未识别";
+            }
+
+            return DutyPartyCount == 1
+                ? $"{DutyMembersPerParty} 人"
+                : $"{DutyMembersPerParty * DutyPartyCount} 人（{DutyPartyCount} 队）";
+        }
+    }
+
+    public string AoeDecisionLabel
+    {
+        get
+        {
+            if (!AoeEnabled)
+            {
+                return "AOE QT 已关闭";
+            }
+
+            if (!CanAttackTarget)
+            {
+                return "当前没有可攻击目标";
+            }
+
+            if (IsAoeMode)
+            {
+                return "已进入群体路线";
+            }
+
+            var requiredTargets = SmartAoeEnabled && Level >= 58 ? 2 : Level >= 12 ? 3 : 0;
+            return requiredTargets == 0
+                ? "当前等级尚未进入群体路线"
+                : $"PR 计数 {ValidEnemyCount}，需要至少 {requiredTargets} 个";
+        }
+    }
+
     public long LastAckAgeMs => AgeSince(LastAckAtMs);
 
     public long LastGaugeReconcileAgeMs => AgeSince(LastGaugeReconciledAtMs);
@@ -136,6 +183,12 @@ internal sealed record BlmUiSnapshot
             TargetDistance = context.TargetDistance,
             TargetHp = context.TargetHp,
             TargetMaxHp = context.TargetMaxHp,
+            DutyMembersPerParty = context.DutyComposition.MembersPerParty,
+            DutyPartyCount = context.DutyComposition.PartyCount,
+            ValidEnemyCount = context.EnemyCount,
+            AoeEnabled = context.AoeEnabled,
+            SmartAoeEnabled = context.SmartAoeEnabled,
+            IsAoeMode = context.IsAoeMode,
             HistoryReliable = tracker.HistoryReliable,
             CombatSerial = tracker.CombatSerial,
             StateGeneration = tracker.StateGeneration,

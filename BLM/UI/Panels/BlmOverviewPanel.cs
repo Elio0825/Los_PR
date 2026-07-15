@@ -199,10 +199,20 @@ internal static class BlmOverviewPanel
                         ? $"{snapshot.TargetHp:N0} / {snapshot.TargetMaxHp:N0}"
                         : "--",
                     scale);
+                LosComponents.KeyValueRow("副本人数", snapshot.DutySizeLabel, scale);
+                LosComponents.KeyValueRow(
+                    "有效目标数（PR）",
+                    snapshot.ValidEnemyCount.ToString(),
+                    scale);
+                LosComponents.KeyValueRow(
+                    "AOE 判定",
+                    snapshot.AoeDecisionLabel,
+                    scale,
+                    snapshot.IsAoeMode ? LosPalette.Success : LosPalette.TextSecondary);
             },
             "当前目标",
             snapshot.InCombat ? "战斗状态已建立" : "等待进入战斗",
-            height: 280f,
+            height: 340f,
             scale: scale);
     }
 

@@ -165,7 +165,8 @@ internal sealed class BlmOpenerExecutionService
                     && _plan.Variant == variant;
             }
 
-            if (!IsVariantEnabled(policy, variant)
+            if (!policy.HighEndCountdownEnabled
+                || !IsVariantEnabled(policy, variant)
                 || context.InCombat
                 || !BlmAdditionalOpenerDefinitions.SupportsLevel(variant, context.Level))
             {
@@ -516,8 +517,10 @@ internal sealed class BlmOpenerExecutionService
             potionId: 0,
             policy.NoTriplecast);
         if (!policy.Enabled
+            || !policy.DailyInCombatEnabled
             || policy.Level100FlareEnabled
             || !context.InCombat
+            || !context.DutyComposition.IsSinglePartyEightPlayer
             || highPriorityQueueActive
             || context.Tracker.CombatSerial <= 0
             || context.Tracker.CombatSerial == _lastAttemptedCombatSerial
