@@ -2,14 +2,14 @@ using System.Collections.Immutable;
 
 namespace LosPr.BLM.Resolvers;
 
-public enum BlmResolverChannel
+internal enum BlmResolverChannel
 {
     Gcd,
     Always,
     OffGcd,
 }
 
-public enum BlmResolverTargetKind
+internal enum BlmResolverTargetKind
 {
     CurrentTarget,
     Self,
@@ -17,25 +17,25 @@ public enum BlmResolverTargetKind
     Potion,
 }
 
-public enum BlmResolverManifestDisposition
+internal enum BlmResolverManifestDisposition
 {
     Active,
     RejectSingleTarget,
     Inactive,
 }
 
-public readonly record struct BlmResolverManifestEntry(
+internal readonly record struct BlmResolverManifestEntry(
     int Order,
     BlmResolverChannel Channel,
     string ResolverId,
     BlmResolverManifestDisposition Disposition);
 
-public readonly record struct BlmResolverSettingDefinition(
+internal readonly record struct BlmResolverSettingDefinition(
     string PropertyName,
     string LosAeSource,
     string DefaultValue);
 
-public sealed record BlmResolverSettings
+internal sealed record BlmResolverSettings
 {
     public static BlmResolverSettings Default { get; } = new();
 
@@ -55,7 +55,6 @@ public sealed record BlmResolverSettings
         new(nameof(LeyLinesEnabled), "QT:黑魔纹", "true"),
         new(nameof(AutoMitigationEnabled), "QT:自动减伤", "true"),
         new(nameof(PotionEnabled), "QT:爆发药", "false"),
-        new(nameof(SkipIceParadox), "QT:不打冰悖论", "false"),
         new(nameof(CompressFireParadox), "BlackMageSetting:压缩火悖论", "true"),
         new(nameof(ReducedAnimationLockEnabled), "BlackMageSetting:动画锁模式 == 1", "true"),
         new(nameof(DotHpThresholdPercent), "BlackMageSetting:不上Dot阈值", "3"),
@@ -75,13 +74,12 @@ public sealed record BlmResolverSettings
     public bool LeyLinesEnabled { get; init; } = true;
     public bool AutoMitigationEnabled { get; init; } = true;
     public bool PotionEnabled { get; init; }
-    public bool SkipIceParadox { get; init; }
     public bool CompressFireParadox { get; init; } = true;
     public bool ReducedAnimationLockEnabled { get; init; } = true;
     public int DotHpThresholdPercent { get; init; } = 3;
 }
 
-public sealed record BlmResolverContextFacts
+internal sealed record BlmResolverContextFacts
 {
     public long CapturedAtMs { get; init; }
     public bool IsAvailable { get; init; }
@@ -97,6 +95,10 @@ public sealed record BlmResolverContextFacts
     public bool IsCasting { get; init; }
     public bool IsSingleTargetMode { get; init; }
     public int EnemyCount { get; init; }
+    public uint AoeTargetId { get; init; }
+    public bool AoeTargetCanUseAttack { get; init; }
+    public int AoeTargetHitCount { get; init; }
+    public bool AoeTargetIsCurrentTarget { get; init; }
     public bool HasTarget { get; init; }
     public bool CanUseAttackActionOnTarget { get; init; }
     public uint CurrentTargetId { get; init; }
@@ -126,12 +128,13 @@ public sealed record BlmResolverContextFacts
     public bool IsAoeMode => !IsSingleTargetMode;
     public bool IsTwoTargetAoe => IsAoeMode && EnemyCount == 2;
     public bool IsThreePlusAoe => IsAoeMode && EnemyCount >= 3;
+    public int RequiredAoeHitCount => IsTwoTargetAoe ? 2 : IsThreePlusAoe ? 3 : 0;
     public bool HasInstantCast =>
         BlmDecisionPrimitives.HasInstantCast(HasSwiftcast, TriplecastStacks);
     public double GcdRemainMs => Math.Max(0d, GcdRemainSeconds * 1000d);
 }
 
-public sealed record BlmResolverActionFact
+internal sealed record BlmResolverActionFact
 {
     public uint RequestedActionId { get; init; }
     public uint AdjustedActionId { get; init; }
@@ -147,7 +150,7 @@ public sealed record BlmResolverActionFact
         : AdjustedActionId;
 }
 
-public sealed record BlmResolverDotTargetFact
+internal sealed record BlmResolverDotTargetFact
 {
     public uint EntityId { get; init; }
     public bool IsValid { get; init; }
@@ -173,31 +176,31 @@ public sealed record BlmResolverDotTargetFact
         AoeDotRemainingMs);
 }
 
-public readonly record struct BlmDoubleDotMemory(
+internal readonly record struct BlmDoubleDotMemory(
     uint LastTargetId,
     long LastCastAtMs);
 
-public sealed record BlmLevel100LoopFacts
+internal sealed record BlmLevel100LoopFacts
 {
     public int Fire4Count { get; init; }
     public bool FireParadoxUsed { get; init; }
     public bool RecoveringAfterSpecial { get; init; }
 }
 
-public sealed record BlmCasualCombatFacts
+internal sealed record BlmCasualCombatFacts
 {
     public bool IsCasualDutyNonBoss { get; init; }
     public float NearbyEnemiesTotalHpRatio { get; init; }
     public float NearbyEnemiesAverageTtkMs { get; init; }
 }
 
-public sealed record BlmDefensiveCastFacts
+internal sealed record BlmDefensiveCastFacts
 {
     public bool TargetCastIsDeathSentenceWithin3Seconds { get; init; }
     public bool TargetCastIsBossAoeWithin3Seconds { get; init; }
 }
 
-public sealed record BlmResolverInput
+internal sealed record BlmResolverInput
 {
     public long StateGeneration { get; init; }
     public BlmResolverContextFacts Context { get; init; } = new();
@@ -223,7 +226,7 @@ public sealed record BlmResolverInput
         BlmResolverFactCoverage.Phase3A;
 }
 
-public sealed record BlmResolverFactCoverage
+internal sealed record BlmResolverFactCoverage
 {
     public static BlmResolverFactCoverage Phase3A { get; } = new();
 
@@ -245,7 +248,7 @@ public sealed record BlmResolverFactCoverage
         "ExactWeaveChannel,CasualDutyAverageTtk,DefensiveCast,Potion,DotBlacklist,MultiTargetDot";
 }
 
-public sealed record BlmResolverCandidate
+internal sealed record BlmResolverCandidate
 {
     public uint ActionId { get; init; }
     public uint TargetId { get; init; }
@@ -255,7 +258,7 @@ public sealed record BlmResolverCandidate
     public int CheckCode { get; init; }
 }
 
-public sealed record BlmDecisionFrame
+internal sealed record BlmDecisionFrame
 {
     public BlmResolverCandidate? GcdCandidate { get; init; }
     public BlmResolverCandidate? AlwaysCandidate { get; init; }

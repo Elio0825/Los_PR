@@ -6,7 +6,7 @@ using LosPr.BLM.UI.Theme;
 
 namespace LosPr.BLM.UI.Layout;
 
-public static class LosHeader
+internal static class LosHeader
 {
     public static void Draw(
         string id,
@@ -30,22 +30,33 @@ public static class LosHeader
             pos,
             pos + size,
             LosPalette.ToUInt(LosTheme.ApplyBackgroundOpacity(LosPalette.Surface)));
-        drawList.AddRectFilled(
-            pos,
-            pos + new Vector2(LosMetrics.Scale(4f, scale), size.Y),
-            LosPalette.ToUInt(LosPalette.Primary));
         drawList.AddLine(
             pos + new Vector2(0f, size.Y - 1f),
             pos + new Vector2(size.X, size.Y - 1f),
             LosPalette.ToUInt(LosPalette.Separator),
             1f);
-        drawList.AddLine(
-            pos + new Vector2(LosMetrics.Scale(4f, scale), 1f),
-            pos + new Vector2(LosMetrics.Scale(52f, scale), 1f),
-            LosPalette.ToUInt(LosPalette.Cyan),
-            LosMetrics.Scale(2f, scale));
+        DrawConstellation(drawList, pos, size, scale);
 
-        var rightPadding = LosMetrics.Scale(16f, scale);
+        var iconPosition = pos + LosMetrics.Scale(new Vector2(28f, 16f), scale);
+        var iconSize = LosMetrics.Scale(new Vector2(56f, 56f), scale);
+        drawList.AddRectFilled(
+            iconPosition,
+            iconPosition + iconSize,
+            LosPalette.ToUInt(LosPalette.PrimaryMuted),
+            LosMetrics.Scale(14f, scale));
+        drawList.AddRect(
+            iconPosition,
+            iconPosition + iconSize,
+            LosPalette.ToUInt(LosPalette.WithAlpha(LosPalette.PrimaryHover, 0.55f)),
+            LosMetrics.Scale(14f, scale),
+            ImDrawFlags.None,
+            1f);
+        DrawBlackMageSigil(
+            drawList,
+            iconPosition + (iconSize * 0.5f),
+            scale);
+
+        var rightPadding = LosMetrics.Scale(28f, scale);
         var statusWidth = LosMetrics.Scale(LosMetrics.StatusPillWidth, scale);
         var statusHeight = LosMetrics.Scale(26f, scale);
         var statusPos = new Vector2(
@@ -55,16 +66,19 @@ public static class LosHeader
         var showBadge = !compact && !string.IsNullOrWhiteSpace(badge);
         var badgeWidth = showBadge ? LosMetrics.Scale(76f, scale) : 0f;
         var gap = showBadge ? LosMetrics.Scale(10f, scale) : 0f;
-        var titleLeft = pos.X + LosMetrics.Scale(20f, scale);
+        var titleLeft = iconPosition.X + iconSize.X + LosMetrics.Scale(16f, scale);
         var textRight = statusPos.X - gap - badgeWidth - LosMetrics.Scale(16f, scale);
         var textWidth = MathF.Max(20f, textRight - titleLeft);
 
         var fittedTitle = LosComponents.FitText(title, textWidth);
-        var titleSize = ImGui.CalcTextSize(fittedTitle);
+        var titleFontSize = ImGui.GetFontSize() * 1.12f;
+        var titleSize = ImGui.CalcTextSize(fittedTitle) * 1.12f;
         var titleY = compact
             ? pos.Y + ((size.Y - titleSize.Y) * 0.5f)
-            : pos.Y + LosMetrics.Scale(17f, scale);
+            : pos.Y + LosMetrics.Scale(15f, scale);
         drawList.AddText(
+            ImGui.GetFont(),
+            titleFontSize,
             new Vector2(titleLeft, titleY),
             LosPalette.ToUInt(LosPalette.TextPrimary),
             fittedTitle);
@@ -96,6 +110,75 @@ public static class LosHeader
         finally
         {
             ImGui.PopID();
+        }
+    }
+
+    private static void DrawBlackMageSigil(
+        ImDrawListPtr drawList,
+        Vector2 center,
+        float scale)
+    {
+        var outer = LosMetrics.Scale(20f, scale);
+        var core = LosMetrics.Scale(8f, scale);
+        var rayStart = LosMetrics.Scale(13f, scale);
+        var rayEnd = LosMetrics.Scale(19f, scale);
+        for (var index = 0; index < 6; index++)
+        {
+            var angle = -MathF.PI * 0.5f + index * (MathF.PI / 3f);
+            var direction = new Vector2(MathF.Cos(angle), MathF.Sin(angle));
+            drawList.AddLine(
+                center + direction * rayStart,
+                center + direction * rayEnd,
+                LosPalette.ToUInt(LosPalette.WithAlpha(LosPalette.Cyan, 0.78f)),
+                LosMetrics.Scale(1.5f, scale));
+        }
+
+        drawList.AddCircle(
+            center,
+            outer,
+            LosPalette.ToUInt(LosPalette.WithAlpha(LosPalette.Primary, 0.62f)),
+            32,
+            LosMetrics.Scale(1.2f, scale));
+
+        drawList.AddQuadFilled(
+            center + new Vector2(0f, -core),
+            center + new Vector2(core, 0f),
+            center + new Vector2(0f, core),
+            center + new Vector2(-core, 0f),
+            LosPalette.ToUInt(LosPalette.Cyan));
+        drawList.AddCircleFilled(
+            center,
+            LosMetrics.Scale(2.5f, scale),
+            LosPalette.ToUInt(LosPalette.TextPrimary),
+            16);
+    }
+
+    private static void DrawConstellation(
+        ImDrawListPtr drawList,
+        Vector2 pos,
+        Vector2 size,
+        float scale)
+    {
+        if (size.X < LosMetrics.Scale(520f, scale))
+            return;
+
+        var points = new[]
+        {
+            pos + new Vector2(size.X * 0.56f, LosMetrics.Scale(18f, scale)),
+            pos + new Vector2(size.X * 0.64f, LosMetrics.Scale(34f, scale)),
+            pos + new Vector2(size.X * 0.72f, LosMetrics.Scale(14f, scale)),
+            pos + new Vector2(size.X * 0.80f, LosMetrics.Scale(32f, scale)),
+        };
+        var lineColor = LosPalette.ToUInt(LosPalette.WithAlpha(LosPalette.Cyan, 0.14f));
+        var starColor = LosPalette.ToUInt(LosPalette.WithAlpha(LosPalette.MoonGold, 0.34f));
+        for (var index = 0; index < points.Length - 1; index++)
+        {
+            drawList.AddLine(points[index], points[index + 1], lineColor, 1f);
+        }
+
+        foreach (var point in points)
+        {
+            drawList.AddCircleFilled(point, LosMetrics.Scale(1.8f, scale), starColor, 10);
         }
     }
 

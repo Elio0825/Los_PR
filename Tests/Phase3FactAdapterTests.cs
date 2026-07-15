@@ -1,5 +1,6 @@
 using System.Collections.Immutable;
 using LosPr.BLM.Core;
+using LosPr.BLM.Data;
 using LosPr.BLM.Resolvers;
 using LosPr.BLM.Resolvers.Level100;
 using PromeRotation.Data;
@@ -19,7 +20,26 @@ internal static class Phase3FactAdapterTests
         AcrOffDoesNotAccumulateIdle();
         EntitySnapshotValidationFailsClosed();
         GenerationMismatchFailsClosed();
+        MinimumEnabledLevelFailsClosed();
         RequiredActionTableMatchesLevel100Closure();
+    }
+
+    private static void MinimumEnabledLevelFailsClosed()
+    {
+        const long generation = 71;
+        var context = BaseContext(generation) with { Level = 90 };
+        var adapter = new BlmResolverInputAdapter(
+            settingsProvider: () => new BlackMageSettings { MinimumEnabledLevel = 100 });
+        var captured = adapter.TryCapture(
+            context,
+            Decision(generation),
+            highPriority: false,
+            out var input,
+            out var reason);
+
+        AssertEx.False(captured, "低于最低启用等级时不得创建生产决策帧");
+        AssertEx.Equal("BelowMinimumEnabledLevel", reason, "最低等级阻断原因错误");
+        AssertEx.Equal(90, input.Context.Level, "阻断帧仍应保留当前等级用于诊断");
     }
 
     private static void TrackerDecisionSnapshotIsAtomicAndGenerationBound()
@@ -80,6 +100,10 @@ internal static class Phase3FactAdapterTests
             CurrentCastingActionId = BLMSkill.冰封,
             EnemyCount = 2,
             IsAoeMode = true,
+            AoeTargetId = 201,
+            AoeTargetCanUseAttack = true,
+            AoeTargetHitCount = 3,
+            AoeTargetIsCurrentTarget = false,
             HasLeyLines = true,
             HasLeyLinesStatus737 = true,
             HasLeyLinesHaste = false,
@@ -103,13 +127,22 @@ internal static class Phase3FactAdapterTests
             decision,
             new BlmResolverRuntimeState { StateGeneration = generation },
             actions,
-            highPriority: true);
+            highPriority: true,
+            consoleSettings: new BlackMageSettings
+            {
+                DotHpThresholdPercent = 17,
+                CompressFireParadoxEnabled = false,
+            });
 
         AssertEx.Equal(BLMSkill.冰封, input.CurrentCastingActionId, "当前读条动作未投影");
         AssertEx.Equal(generation, input.StateGeneration, "输入必须显式携带 Tracker generation");
         AssertEx.False(input.Context.IsSingleTargetMode, "最终AOE模式未映射");
         AssertEx.Equal(2, input.Context.EnemyCount, "敌人数事实未映射");
         AssertEx.True(input.Context.IsTwoTargetAoe, "双目标AOE派生事实错误");
+        AssertEx.Equal(201u, input.Context.AoeTargetId, "AOE中心ID未映射");
+        AssertEx.True(input.Context.AoeTargetCanUseAttack, "AOE中心攻击资格未映射");
+        AssertEx.Equal(3, input.Context.AoeTargetHitCount, "AOE中心命中数未映射");
+        AssertEx.False(input.Context.AoeTargetIsCurrentTarget, "AOE指定中心事实未映射");
         AssertEx.True(input.Context.HasLeyLinesStatus737, "737 应独立投影");
         AssertEx.False(input.Context.HasLeyLinesHaste738, "738 不得由合并 HasLeyLines 推断");
         AssertEx.Equal(3, input.Context.MaxPolyglotStacks, "通晓等级上限事实未投影");
@@ -125,6 +158,7 @@ internal static class Phase3FactAdapterTests
         AssertEx.False(input.Settings.AmplifierEnabled, "详述 QT 映射错误");
         AssertEx.False(input.Settings.LeyLinesEnabled, "黑魔纹 QT 映射错误");
         AssertEx.False(input.Settings.CompressFireParadox, "压缩火悖论映射错误");
+        AssertEx.Equal(17, input.Settings.DotHpThresholdPercent, "控制台 DOT 阈值未映射");
         AssertEx.Equal(
             BlmResolverSettings.Default.ManafontEnabled,
             input.Settings.ManafontEnabled,

@@ -57,15 +57,15 @@ internal static class Phase4C0AbilityCoordinationTests
         foreach (var order in new[] { 4, 8, 10, 11, 12, 13, 14 })
         {
             AssertEx.Equal(
-                BlmResolverManifestDisposition.RejectSingleTarget,
+                BlmResolverManifestDisposition.Active,
                 Level100ResolverEngine.Manifest[order].Disposition,
-                $"Manifest order {order} 必须保持Reject");
+                $"4C-1 Manifest order {order} 必须激活");
         }
 
         AssertEx.Equal(
             Level100ResolverEngine.FrozenManifestSha256,
             Level100ResolverEngine.ManifestSha256,
-            "4C-0不得改变Manifest哈希");
+            "4C-1 Manifest哈希不匹配");
         AssertEx.Equal(
             "5D70EB5EF186407B6FC6798CF14DCE81313207A763B0C4F82CF667451B6756BB",
             Level100ResolverEngine.LosAeInstantGcdTriggerSha256,
@@ -434,14 +434,10 @@ internal static class Phase4C0AbilityCoordinationTests
         {
             Context = BaseInput().Context with { HasParadox = true },
         };
-        AssertEx.Equal(BLMSkill.悖论, SelectAoeFill(iceParadox), "AOE冰悖论填充错误");
         AssertEx.Equal(
-            0u,
-            SelectAoeFill(iceParadox with
-            {
-                Settings = iceParadox.Settings with { SkipIceParadox = true },
-            }),
-            "不打冰悖论必须生效");
+            BLMSkill.悖论,
+            SelectAoeFill(iceParadox),
+            "跳过策略废弃后AOE冰悖论必须始终作为填充");
 
         var despair = BaseInput() with
         {

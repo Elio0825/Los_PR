@@ -91,10 +91,7 @@ internal static partial class Level100AbilityResolvers
         }
 
         var direction = BlmAoeTransposeDirection.None;
-        if (context.InIce
-            && (context.UmbralHearts == 3
-                || Level100ResolverFacts.PreviousGcdMatches(input, BLMSkill.玄冰)
-                || Level100ResolverFacts.RecentlyUsed(input, BLMSkill.玄冰, 2500)))
+        if (context.InIce && PendingAoeIceResourceAction(input) == 0)
         {
             direction = BlmAoeTransposeDirection.ToFire;
         }
@@ -145,6 +142,24 @@ internal static partial class Level100AbilityResolvers
             fillActionId);
     }
 
+    internal static uint PendingAoeIceResourceAction(BlmResolverInput input)
+    {
+        var context = input.Context;
+        if (!context.IsAoeMode || !context.InIce || context.Level < 58)
+        {
+            return 0;
+        }
+
+        var actionId = context.Level >= 100 && context.IsTwoTargetAoe
+            ? BLMSkill.冰澈
+            : BLMSkill.玄冰;
+        return context.UmbralHearts == 3
+            || Level100ResolverFacts.PreviousGcdMatches(input, actionId)
+            || Level100ResolverFacts.RecentlyUsed(input, actionId, 2500)
+                ? 0
+                : actionId;
+    }
+
     private static bool ShouldDeferAoeTransposeToManafont(BlmResolverInput input)
     {
         if (!input.Settings.ManafontEnabled)
@@ -182,7 +197,9 @@ internal static partial class Level100AbilityResolvers
                 return 88;
             }
 
-            if (context.InIce && !context.HasParadox)
+            if (context.InIce
+                && !context.HasParadox
+                && Level100ResolverFacts.IsSingleTargetIceReadyToTranspose(input))
             {
                 return 99;
             }
@@ -220,26 +237,14 @@ internal static partial class Level100AbilityResolvers
 
         if (context.InIce)
         {
-            var readyToLeaveIce = context.UmbralIceStacks == 3
-                && context.UmbralHearts == 3;
-            if (context.HasParadox
-                && readyToLeaveIce
-                && !input.Settings.SkipIceParadox)
+            var readyToLeaveIce =
+                Level100ResolverFacts.IsSingleTargetIceReadyToTranspose(input);
+            if (context.HasParadox && readyToLeaveIce)
             {
                 return -3;
             }
 
-            if (context.UmbralIceStacks != 3)
-            {
-                return -4;
-            }
-
-            if (context.UmbralHearts != 3)
-            {
-                return -6;
-            }
-
-            return 4;
+            return readyToLeaveIce ? 4 : -4;
         }
 
         return -99;
@@ -260,7 +265,9 @@ internal static partial class Level100AbilityResolvers
                 return true;
             }
 
-            if (context.InIce && !context.HasParadox)
+            if (context.InIce
+                && !context.HasParadox
+                && Level100ResolverFacts.IsSingleTargetIceReadyToTranspose(input))
             {
                 return true;
             }
@@ -284,10 +291,9 @@ internal static partial class Level100AbilityResolvers
             return false;
         }
 
-        var readyToLeaveIce = context.UmbralIceStacks == 3
-            && context.UmbralHearts == 3;
-        return readyToLeaveIce
-            && (!context.HasParadox || input.Settings.SkipIceParadox);
+        var readyToLeaveIce =
+            Level100ResolverFacts.IsSingleTargetIceReadyToTranspose(input);
+        return readyToLeaveIce && !context.HasParadox;
     }
 
     private static bool ShouldDeferTransposeToManafont(BlmResolverInput input)

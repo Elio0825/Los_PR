@@ -1,6 +1,4 @@
 using System;
-using System.Collections.Generic;
-using System.Linq;
 using System.Numerics;
 using Dalamud.Bindings.ImGui;
 using LosPr.BLM.UI.Components;
@@ -9,179 +7,273 @@ using LosPr.BLM.UI.Theme;
 
 namespace LosPr.BLM.UI.Panels;
 
-public static class BlmControlPanel
+internal static class BlmStylePanel
 {
-    private static string? _feedback;
-    private static DateTime _feedbackUntilUtc;
-
-    public static void Draw(BlackMageSettingsStore store, float scale, bool reduceMotion)
+    public static void Draw(
+        BlackMageSettingsStore store,
+        float scale,
+        bool reduceMotion,
+        Action resetInterface)
     {
-        LosSection.Draw(
-            "control_presets",
-            "快速预设",
-            () => LosCard.Draw(
-                "control_preset_card",
-                () => DrawPresets(store, scale),
-                "策略偏好",
-                "预设不会切换单体/AOE，也不会开启实验路线",
-                height: 270f,
-                scale: scale),
-            scale: scale);
+        DrawThemeSelector(store, scale, reduceMotion);
+        DrawAdaptivePair(
+            "style_middle",
+            () => DrawAppearance(store, scale),
+            () => DrawOverlayScale(store, scale),
+            scale);
+        DrawAdaptivePair(
+            "style_bottom",
+            () => DrawMotion(store, scale, reduceMotion),
+            () => DrawWindowSettings(store, scale, reduceMotion, resetInterface),
+            scale);
+    }
 
-        LosSection.Draw(
-            "control_all_qt",
-            "全部 QT",
-            () => LosCard.Draw(
-                "control_all_qt_card",
-                () => DrawAllQts(store, scale, reduceMotion),
-                "即时开关",
-                "只调整决策条件，不会从控制台直接释放技能",
-                height: ImGui.GetContentRegionAvail().X >= 720f * scale ? 390f : 690f,
-                scale: scale),
+    private static void DrawThemeSelector(
+        BlackMageSettingsStore store,
+        float scale,
+        bool reduceMotion)
+    {
+        LosCard.Draw(
+            "style_theme_card",
+            () =>
+            {
+                var current = store.Settings.UiThemeStyle;
+                DrawThemeButton(
+                    "theme_amethyst",
+                    "紫晶黑猫",
+                    "靛蓝 / 紫晶 / 薰衣草；使用本地猫使魔图片。",
+                    BlmUiThemeStyle.AmethystCat,
+                    current,
+                    store,
+                    scale,
+                    reduceMotion);
+                DrawThemeButton(
+                    "theme_moonlit",
+                    "月影黑猫",
+                    "深墨蓝 / 月金 / 星界蓝",
+                    BlmUiThemeStyle.MoonlitCat,
+                    current,
+                    store,
+                    scale,
+                    reduceMotion);
+                DrawThemeButton(
+                    "theme_astral",
+                    "星界使魔",
+                    "夜海蓝 / 奥术紫 / 冷光",
+                    BlmUiThemeStyle.AstralFamiliar,
+                    current,
+                    store,
+                    scale,
+                    reduceMotion);
+                DrawThemeButton(
+                    "theme_ember",
+                    "余烬魔猫",
+                    "暗绯红 / 炉火橙 / 黄铜",
+                    BlmUiThemeStyle.EmberFamiliar,
+                    current,
+                    store,
+                    scale,
+                    reduceMotion);
+            },
+            "主题变体",
+            "选择一套顺眼的控制台配色",
+            height: 240f,
             scale: scale);
     }
 
-    private static void DrawPresets(BlackMageSettingsStore store, float scale)
+    private static void DrawThemeButton(
+        string id,
+        string label,
+        string tooltip,
+        BlmUiThemeStyle value,
+        BlmUiThemeStyle current,
+        BlackMageSettingsStore store,
+        float scale,
+        bool reduceMotion)
     {
-        var gap = 8f * scale;
-        var available = ImGui.GetContentRegionAvail().X;
-        var stack = available < 620f * scale;
-        var buttonWidth = stack ? available : Math.Max(150f * scale, (available - gap * 2f) / 3f);
-        var buttonSize = new Vector2(buttonWidth, 36f * scale);
-
-        if (LosComponents.PrimaryButton(
-                "preset_daily",
-                "应用日常预设",
-                size: buttonSize,
-                scale: scale,
-                tooltip: "偏向自动收尾和移动容错；保留当前目标数量策略。"))
+        if (LosComponents.SegmentButton(
+                id,
+                label,
+                current == value,
+                new Vector2(-1f, 32f * scale),
+                scale,
+                reduceMotion,
+                tooltip))
         {
-            ApplyPreset(
-                store,
-                "已应用日常预设",
-                new Dictionary<string, bool>
-                {
-                    ["Dot"] = true,
-                    ["TTK"] = true,
-                    ["移动通晓"] = true,
-                    ["移动三连"] = true,
-                    ["压缩火悖论"] = true,
-                    ["即刻进冰"] = true,
-                    ["三连进冰"] = true,
-                    ["黑魔纹"] = true,
-                    ["详述"] = true,
-                });
-        }
-
-        if (!stack)
-            ImGui.SameLine(0f, gap);
-        if (LosComponents.SecondaryButton(
-                "preset_high_end",
-                "应用高难预设",
-                size: buttonSize,
-                scale: scale,
-                tooltip: "关闭自动收尾，保留最终方案的悖论压缩默认值和当前目标数量策略。"))
-        {
-            ApplyPreset(
-                store,
-                "已应用高难预设",
-                new Dictionary<string, bool>
-                {
-                    ["Dot"] = true,
-                    ["TTK"] = false,
-                    ["移动通晓"] = true,
-                    ["移动三连"] = true,
-                    ["压缩火悖论"] = true,
-                    ["即刻进冰"] = true,
-                    ["三连进冰"] = true,
-                    ["黑魔纹"] = true,
-                    ["详述"] = true,
-                });
-        }
-
-        if (!stack)
-            ImGui.SameLine(0f, gap);
-        if (LosComponents.SecondaryButton(
-                "preset_defaults",
-                "恢复作者默认",
-                size: buttonSize,
-                scale: scale,
-                tooltip: "恢复所有 QT 默认值，包括关闭实验路线。"))
-        {
-            ApplyPreset(store, "已恢复作者默认", BlackMageRotation.QtList);
-        }
-
-        ImGui.Dummy(new Vector2(0f, 8f * scale));
-        BlmPanelPrimitives.DrawMuted(
-            "日常/高难是策略偏好预设，不代表单体或群体模式。AOE 与智能AOE保持当前值，可在下方单独调整。");
-
-        if (_feedback is not null && DateTime.UtcNow <= _feedbackUntilUtc)
-        {
-            ImGui.Dummy(new Vector2(0f, 8f * scale));
-            LosComponents.StatusPill(_feedback, LosStatusTone.Success, scale);
+            store.Update(settings => settings.UiThemeStyle = value);
         }
     }
 
-    private static void DrawAllQts(BlackMageSettingsStore store, float scale, bool reduceMotion)
+    private static void DrawAppearance(
+        BlackMageSettingsStore store,
+        float scale)
     {
-        var entries = BlackMageRotation.QtList.ToArray();
-        var twoColumns = ImGui.GetContentRegionAvail().X >= 720f * scale;
-        if (!twoColumns)
+        LosCard.Draw(
+            "style_appearance_card",
+            () =>
+            {
+                var settings = store.Settings;
+                var uiScale = settings.UiScale;
+                if (LosComponents.SliderFloat(
+                        "整体界面缩放##style_scale",
+                        ref uiScale,
+                        LosMetrics.MinScale,
+                        LosMetrics.MaxScale,
+                        "%.2f x",
+                        "同时调整页头、卡片、文字间距和控件尺寸。",
+                        scale: scale))
+                {
+                    store.Update(value => value.UiScale = uiScale);
+                }
+
+                var opacity = settings.WindowOpacity;
+                if (LosComponents.SliderFloat(
+                        "背景透明度##style_opacity",
+                        ref opacity,
+                        0.70f,
+                        1.00f,
+                        "%.2f",
+                        "只影响控制台背景，不影响文字亮度。",
+                        scale: scale))
+                {
+                    store.Update(value => value.WindowOpacity = opacity);
+                }
+
+            },
+            "界面比例",
+            "调整控制台文字和控件大小",
+            height: 190f,
+            scale: scale);
+    }
+
+    private static void DrawMotion(
+        BlackMageSettingsStore store,
+        float scale,
+        bool reduceMotion)
+    {
+        LosCard.Draw(
+            "style_motion_card",
+            () => BlmPanelPrimitives.DrawToggleRow(
+                "style_reduce_motion",
+                "减少动效",
+                "关闭状态脉冲和页签滑动过渡。",
+                store.Settings.ReduceMotion,
+                value => store.Update(item => item.ReduceMotion = value),
+                scale,
+                reduceMotion),
+            "动效偏好",
+            "减少视觉干扰",
+            height: 125f,
+            scale: scale);
+    }
+
+    private static void DrawOverlayScale(
+        BlackMageSettingsStore store,
+        float scale)
+    {
+        LosCard.Draw(
+            "style_overlay_scale_card",
+            () =>
+            {
+                var qtScale = store.Settings.QtPanelScale;
+                if (LosComponents.SliderFloat(
+                        "QT 面板大小##style_qt_scale",
+                        ref qtScale,
+                        0.70f,
+                        1.50f,
+                        "%.2f x",
+                        "单独调整 QT 浮窗，不改变控制台文字。",
+                        scale: scale))
+                {
+                    store.Update(settings => settings.QtPanelScale = qtScale);
+                }
+
+                var hotkeyScale = store.Settings.HotkeyPanelScale;
+                if (LosComponents.SliderFloat(
+                        "Hotkey 面板大小##style_hotkey_scale",
+                        ref hotkeyScale,
+                        0.70f,
+                        1.50f,
+                        "%.2f x",
+                        "单独调整技能图标浮窗。",
+                        scale: scale))
+                {
+                    store.Update(settings => settings.HotkeyPanelScale = hotkeyScale);
+                }
+            },
+            "浮窗大小",
+            "QT 与 Hotkey 可分别调整",
+            height: 190f,
+            scale: scale);
+    }
+
+    private static void DrawWindowSettings(
+        BlackMageSettingsStore store,
+        float scale,
+        bool reduceMotion,
+        Action resetInterface)
+    {
+        LosCard.Draw(
+            "style_window_card",
+            () =>
+            {
+                var settings = store.Settings;
+                BlmPanelPrimitives.DrawToggleRow(
+                    "style_remember_window",
+                    "记住窗口",
+                    "保存控制台位置与尺寸。",
+                    settings.RememberWindow,
+                    value => store.Update(item => item.RememberWindow = value),
+                    scale,
+                    reduceMotion);
+                BlmPanelPrimitives.DrawDivider(scale);
+                if (LosComponents.SecondaryButton(
+                        "style_reset_window",
+                        "恢复默认窗口与风格",
+                        size: new Vector2(-1f, 34f * scale),
+                        scale: scale,
+                        tooltip: "恢复紫晶黑猫主题、100% 缩放与默认窗口位置。"))
+                {
+                    resetInterface();
+                }
+            },
+            "窗口记忆",
+            "默认尺寸 980 × 700；最小 660 × 500",
+            height: 150f,
+            scale: scale);
+    }
+
+    private static void DrawAdaptivePair(
+        string id,
+        Action left,
+        Action right,
+        float scale)
+    {
+        if (ImGui.GetContentRegionAvail().X < LosMetrics.Scale(680f, scale))
         {
-            DrawQtRange(entries, 0, entries.Length, "control_qt_single", store, scale, reduceMotion);
+            left();
+            right();
             return;
         }
 
-        var split = (entries.Length + 1) / 2;
-        if (!ImGui.BeginTable("##control_qt_columns", 2,
+        if (!ImGui.BeginTable(
+                $"##{id}",
+                2,
                 ImGuiTableFlags.SizingStretchSame | ImGuiTableFlags.NoSavedSettings))
+        {
             return;
+        }
 
         try
         {
             ImGui.TableNextColumn();
-            DrawQtRange(entries, 0, split, "control_qt_left", store, scale, reduceMotion);
+            left();
             ImGui.TableNextColumn();
-            DrawQtRange(entries, split, entries.Length, "control_qt_right", store, scale, reduceMotion);
+            right();
         }
         finally
         {
             ImGui.EndTable();
         }
-    }
-
-    private static void DrawQtRange(
-        KeyValuePair<string, bool>[] entries,
-        int start,
-        int end,
-        string idPrefix,
-        BlackMageSettingsStore store,
-        float scale,
-        bool reduceMotion)
-    {
-        for (var i = start; i < end; i++)
-        {
-            if (i > start)
-                BlmPanelPrimitives.DrawDivider(scale);
-
-            BlmPanelPrimitives.DrawQtToggle(
-                $"{idPrefix}_{i}",
-                entries[i].Key,
-                store,
-                scale,
-                reduceMotion);
-        }
-    }
-
-    private static void ApplyPreset(
-        BlackMageSettingsStore store,
-        string feedback,
-        IReadOnlyDictionary<string, bool> values)
-    {
-        foreach (var (key, value) in values)
-            BlmPanelPrimitives.SafeSetQt(key, value, store);
-
-        _feedback = feedback;
-        _feedbackUntilUtc = DateTime.UtcNow.AddSeconds(2.5);
     }
 }

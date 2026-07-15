@@ -1,6 +1,6 @@
 namespace LosPr.BLM.Core;
 
-public sealed record BlmDotSnapshot
+internal sealed record BlmDotSnapshot
 {
     public uint StatusId { get; init; }
     public float RemainingMs { get; init; }
@@ -10,9 +10,9 @@ public sealed record BlmDotSnapshot
     public bool IsExpiring => RemainingMs is > 0 and < 3000;
 }
 
-public readonly record struct BlmDotRule(uint StatusId, float DurationMs);
+internal readonly record struct BlmDotRule(uint StatusId, float DurationMs);
 
-public sealed record BlmActionAvailability
+internal sealed record BlmActionAvailability
 {
     public uint ActionId { get; init; }
     public bool IsUnlocked { get; init; }
@@ -31,7 +31,7 @@ public sealed record BlmActionAvailability
         : Math.Clamp(1f - NextChargeRemainSeconds / RecastTotalSeconds, 0f, 1f);
 }
 
-public sealed record BlmContext
+internal sealed record BlmContext
 {
     public static BlmContext Unavailable { get; } = new();
 
@@ -72,6 +72,10 @@ public sealed record BlmContext
     public long TargetMaxHp { get; init; }
     public float TargetDistance { get; init; }
     public int EnemyCount { get; init; }
+    public uint AoeTargetId { get; init; }
+    public bool AoeTargetCanUseAttack { get; init; }
+    public int AoeTargetHitCount { get; init; }
+    public bool AoeTargetIsCurrentTarget { get; init; }
     public BlmDotSnapshot SingleTargetDot { get; init; } = new();
     public BlmDotSnapshot AoeDot { get; init; } = new();
 
@@ -117,8 +121,6 @@ public sealed record BlmContext
     public bool ManafontEnabled { get; init; }
     public bool DumpPolyglotEnabled { get; init; }
     public bool FastFlareStarEnabled { get; init; }
-    public bool SkipIceParadox { get; init; }
-
     public bool InFire => Phase == BlmPhase.Fire;
     public bool InIce => Phase == BlmPhase.Ice;
     public bool IsMpFull => MaxMp > 0 && Mp == MaxMp;
@@ -206,6 +208,12 @@ public sealed record BlmContext
                 enemyCount,
                 aoeEnabled,
                 smartAoeEnabled);
+            var aoeTarget = SelectAoeTarget(
+                me,
+                target,
+                hasValidTarget,
+                enemyCount,
+                smartAoeEnabled && isAoeMode);
             var hasLeyLinesStatus737 = me.HasStatus(BlmBuff.黑魔纹);
             var hasLeyLinesHaste = me.HasStatus(BlmBuff.咏速);
 
@@ -242,6 +250,10 @@ public sealed record BlmContext
                 TargetMaxHp = target?.MaxHp ?? 0,
                 TargetDistance = targetDistance,
                 EnemyCount = enemyCount,
+                AoeTargetId = aoeTarget.EntityId,
+                AoeTargetCanUseAttack = aoeTarget.CanUseAttack,
+                AoeTargetHitCount = aoeTarget.HitCount,
+                AoeTargetIsCurrentTarget = aoeTarget.IsCurrentTarget,
                 SingleTargetDot = ReadDot(me, target, SingleTargetDotRuleForLevel(level)),
                 AoeDot = ReadDot(me, target, AoeDotRuleForLevel(level)),
                 Phase = phase,
@@ -268,7 +280,7 @@ public sealed record BlmContext
                 LeyLines = CaptureAction(BLMSkill.黑魔纹, level),
                 Amplifier = CaptureAction(BLMSkill.详述, level),
                 Manafont = CaptureAction(BLMSkill.魔泉, level),
-                CompressFireParadox = ReadQt("压缩火悖论"),
+                CompressFireParadox = true,
                 SwiftcastEnabled = ReadQt("即刻进冰"),
                 TriplecastEnabled = ReadQt("三连进冰"),
                 LeyLinesEnabled = ReadQt("黑魔纹"),
@@ -284,7 +296,6 @@ public sealed record BlmContext
                 ManafontEnabled = ReadQt("魔泉"),
                 DumpPolyglotEnabled = ReadQt("倾泻资源"),
                 FastFlareStarEnabled = ReadQt("快速耀星"),
-                SkipIceParadox = ReadQt("不打冰悖论"),
             };
         }
         catch (Exception exception)
@@ -330,13 +341,29 @@ public sealed record BlmContext
             return 0;
         }
 
-        var count = center.IsTargetable && !center.IsDead && center.IsEnemy() ? 1 : 0;
+        var enemyCount = TargetHelper.EnemyInRangeTarget(center, damageRange);
+        return enemyCount > (uint)int.MaxValue ? int.MaxValue : (int)enemyCount;
+    }
+
+    // PR 原生计数真机 A/B 期间停用；完整保留 Los 资格过滤，便于一处切回和对照。
+    private static int CountEnemiesAroundTargetWithLosEligibility(
+        IBattleChara me,
+        IBattleChara center,
+        float castRange,
+        float damageRange)
+    {
+        if (!IsLiveAoeObject(center.IsTargetable, center.IsDead, center.CurrentHp)
+            || DistanceBetween(me, center) > PRGameData.GetCurrentAttackRange(castRange))
+        {
+            return 0;
+        }
+
+        var count = center.CanUseAttackActionOn() ? 1 : 0;
         for (var index = 0; index < Svc.Objects.Length; index++)
         {
             if (Svc.Objects[index] is not IBattleChara battle
                 || battle.EntityId == center.EntityId
-                || !battle.IsTargetable
-                || battle.IsDead
+                || !IsLiveAoeObject(battle.IsTargetable, battle.IsDead, battle.CurrentHp)
                 || battle.ObjectKind == ObjectKind.Pc
                 || !battle.StatusFlags.HasFlag(StatusFlags.Hostile))
             {
@@ -344,7 +371,13 @@ public sealed record BlmContext
             }
 
             var distanceFromCenter = Vector3.Distance(center.Position, battle.Position);
-            if (distanceFromCenter <= damageRange + battle.HitboxRadius)
+            if (distanceFromCenter <= damageRange + battle.HitboxRadius
+                && IsCountableAoeEnemy(
+                    battle.IsTargetable,
+                    battle.IsDead,
+                    battle.CurrentHp,
+                    battle.StatusFlags.HasFlag(StatusFlags.Hostile),
+                    battle.CanUseAttackActionOn()))
             {
                 count++;
             }
@@ -352,6 +385,126 @@ public sealed record BlmContext
 
         return count;
     }
+
+    internal static bool IsLiveAoeObject(
+        bool isTargetable,
+        bool isDead,
+        long currentHp)
+        => isTargetable && !isDead && currentHp > 0;
+
+    internal static bool IsCountableAoeEnemy(
+        bool isTargetable,
+        bool isDead,
+        long currentHp,
+        bool isHostile,
+        bool canUseAttackActionOn)
+        => IsLiveAoeObject(isTargetable, isDead, currentHp)
+            && isHostile
+            && canUseAttackActionOn;
+
+    private static AoeTargetSelection SelectAoeTarget(
+        IBattleChara me,
+        IBattleChara? currentTarget,
+        bool currentTargetCanUseAttack,
+        int currentTargetHitCount,
+        bool smartAoeEnabled)
+    {
+        if (currentTarget is null || !currentTargetCanUseAttack)
+        {
+            return default;
+        }
+
+        var current = CreateAoeTargetSelection(
+            me,
+            currentTarget,
+            currentTarget.EntityId,
+            currentTargetHitCount);
+        if (!smartAoeEnabled)
+        {
+            return current;
+        }
+
+        var best = current;
+        for (var index = 0; index < Svc.Objects.Length; index++)
+        {
+            if (Svc.Objects[index] is not IBattleChara candidate
+                || candidate.EntityId == currentTarget.EntityId
+                || !IsLiveAoeObject(
+                    candidate.IsTargetable,
+                    candidate.IsDead,
+                    candidate.CurrentHp)
+                || candidate.ObjectKind == ObjectKind.Pc
+                || !candidate.CanUseAttackActionOn())
+            {
+                continue;
+            }
+
+            var selection = CreateAoeTargetSelection(
+                me,
+                candidate,
+                currentTarget.EntityId);
+            if (IsBetterAoeTarget(
+                selection.HitCount,
+                selection.IsCurrentTarget,
+                selection.Distance,
+                selection.EntityId,
+                best.HitCount,
+                best.IsCurrentTarget,
+                best.Distance,
+                best.EntityId))
+            {
+                best = selection;
+            }
+        }
+
+        return best;
+    }
+
+    internal static bool IsBetterAoeTarget(
+        int hitCount,
+        bool isCurrentTarget,
+        float distance,
+        uint entityId,
+        int bestHitCount,
+        bool bestIsCurrentTarget,
+        float bestDistance,
+        uint bestEntityId)
+        => hitCount > bestHitCount
+            || hitCount == bestHitCount
+                && (isCurrentTarget && !bestIsCurrentTarget
+                    || isCurrentTarget == bestIsCurrentTarget
+                        && (distance < bestDistance
+                            || distance == bestDistance && entityId < bestEntityId));
+
+    private static AoeTargetSelection CreateAoeTargetSelection(
+        IBattleChara me,
+        IBattleChara candidate,
+        uint currentTargetId,
+        int? knownHitCount = null)
+    {
+        var distance = DistanceBetween(me, candidate);
+        var canUseAttack = IsLiveAoeObject(
+                candidate.IsTargetable,
+                candidate.IsDead,
+                candidate.CurrentHp)
+            && distance <= PRGameData.GetCurrentAttackRange(25f)
+            && candidate.CanUseAttackActionOn();
+        return new AoeTargetSelection(
+            candidate.EntityId,
+            canUseAttack,
+            canUseAttack
+                ? knownHitCount ?? CountEnemiesAroundTarget(me, candidate, 25f, 5f)
+                : 0,
+            candidate.EntityId == currentTargetId,
+            distance);
+    }
+
+    private readonly record struct AoeTargetSelection(
+        uint EntityId,
+        bool CanUseAttack,
+        int HitCount,
+        bool IsCurrentTarget,
+        float Distance);
 
     public static BlmDotRule SingleTargetDotRuleForLevel(int level) => level switch
     {

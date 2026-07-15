@@ -1,21 +1,23 @@
 namespace LosPr.BLM.UI.Navigation;
 
-public enum BlmConsoleTab
+internal enum BlmConsoleTab
 {
     Overview,
-    Combat,
-    Control,
-    System,
+    Battle,
+    Style,
+    Hotkeys,
+    Debug,
 }
 
-public static class BlmConsoleTabInfo
+internal static class BlmConsoleTabInfo
 {
     public static IReadOnlyList<string> Labels { get; } =
     [
         "概览",
-        "作战",
-        "控制",
-        "系统",
+        "战斗",
+        "风格",
+        "热键",
+        "Debug",
     ];
 
     public static BlmConsoleTab FromIndex(int index)

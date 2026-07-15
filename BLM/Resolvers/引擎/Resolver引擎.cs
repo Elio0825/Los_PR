@@ -4,7 +4,7 @@ using System.Security.Cryptography;
 
 namespace LosPr.BLM.Resolvers.Level100;
 
-public static class Level100ResolverEngine
+internal static class Level100ResolverEngine
 {
     public const string LosAeSpecificationCommit =
         "a3ee18d8c524238bd200f1bbdf906bd77e13038a";
@@ -34,8 +34,22 @@ public static class Level100ResolverEngine
         "1F2102220502B790F62563F536F428C09A8DEADCDFA4C7C0EFA05929B6C70ACE";
     public const string LosAeInstantGcdTriggerSha256 =
         "5D70EB5EF186407B6FC6798CF14DCE81313207A763B0C4F82CF667451B6756BB";
+    public const string LosAeLevel100AoeSha256 =
+        "666F7335A2DD23D6396350FBC4EABA94C478AEDE1690A3FC5045A72569FD91C1";
+    public const string LosAeLevel58AoeSha256 =
+        "0BC18B66FCD9FBFAC8FFF51731AC64BF526DD21EEE88BE785F4A51B677DE4D1D";
+    public const string LosAeLevel50AoeSha256 =
+        "FE26010CB1B9B16A0C0AAB9995EE1A5141FF38D132BC5827239AD0D919C6E46D";
+    public const string LosAeLevel35AoeSha256 =
+        "C138C9DE40547BC619B18FB75A02193A6606C9CD680F1E80321C51F0BD3753D6";
+    public const string LosAeLevel1AoeSha256 =
+        "006D352FEFF157143938C2D97AC5360C0C1AE812CEFE0B84BFC8ADE93FE106D0";
+    public const string LosAeAoeThunderSha256 =
+        "A6D4B66E5D0EBE475B37D6AB8998D28748A50D1BC3DAC58580E2F2F3D33842A2";
+    public const string LosAeFoulSha256 =
+        "63B5137D3D7FB7C61E5FB56E7D4EAAD4CD73A63F867EFF1BA2B764593F30F553";
     public const string FrozenManifestSha256 =
-        "F349964AE903890E5E788E6242A0425CD6A41CCC93208820CBB6C8D2DDE3DB6A";
+        "2FC09B90C567836481DE95380C964EA89875BF56C2B9B2F1361588C10697E5D4";
 
     public static ImmutableArray<BlmResolverManifestEntry> Manifest { get; } =
     [
@@ -43,17 +57,17 @@ public static class Level100ResolverEngine
         Entry(1, BlmResolverChannel.Gcd, "GCD.快速耀星"),
         Entry(2, BlmResolverChannel.Gcd, "GCD.强制回冰"),
         Entry(3, BlmResolverChannel.Gcd, "GCD.异言#1"),
-        Reject(4, BlmResolverChannel.Gcd, "GCD.秽浊"),
+        Entry(4, BlmResolverChannel.Gcd, "GCD.秽浊"),
         Entry(5, BlmResolverChannel.Gcd, "GCD.异言#2"),
         Entry(6, BlmResolverChannel.Gcd, "GCD.双DOT"),
         Entry(7, BlmResolverChannel.Gcd, "GCD.雷1"),
-        Reject(8, BlmResolverChannel.Gcd, "GCD.雷2"),
+        Entry(8, BlmResolverChannel.Gcd, "GCD.雷2"),
         Entry(9, BlmResolverChannel.Gcd, "GCD.瞬发gcd触发器"),
-        Reject(10, BlmResolverChannel.Gcd, "GCD.群体100"),
-        Reject(11, BlmResolverChannel.Gcd, "GCD.群体58_99"),
-        Reject(12, BlmResolverChannel.Gcd, "GCD.群体50_57"),
-        Reject(13, BlmResolverChannel.Gcd, "GCD.群体35_49"),
-        Reject(14, BlmResolverChannel.Gcd, "GCD.群体1_34"),
+        Entry(10, BlmResolverChannel.Gcd, "GCD.群体100"),
+        Entry(11, BlmResolverChannel.Gcd, "GCD.群体58_99"),
+        Entry(12, BlmResolverChannel.Gcd, "GCD.群体50_57"),
+        Entry(13, BlmResolverChannel.Gcd, "GCD.群体35_49"),
+        Entry(14, BlmResolverChannel.Gcd, "GCD.群体1_34"),
         Entry(15, BlmResolverChannel.Gcd, "GCD.单体100"),
         Entry(16, BlmResolverChannel.Gcd, "GCD.单体90_99"),
         Entry(17, BlmResolverChannel.Gcd, "GCD.单体72_89"),
@@ -97,18 +111,29 @@ public static class Level100ResolverEngine
             return CreateFrame(input, null, null, null, false, false);
         }
 
-        var gcdCandidate = input.Context.IsSingleTargetMode
-            ? EvaluateChannel(input, BlmResolverChannel.Gcd)
-            : null;
+        var aoePlan = input.Context.IsAoeMode
+            ? Level100AbilityResolvers.BuildAoeTransposePlan(input)
+            : BlmAoeTransposePlan.None;
+        var gcdCandidate = EvaluateGcdChannel(input, aoePlan);
         var alwaysCandidate = EvaluateChannel(input, BlmResolverChannel.Always);
         var offGcdCandidate = EvaluateChannel(input, BlmResolverChannel.OffGcd);
+        var aoeManafontBridgeCandidate = input.Context.IsAoeMode
+            ? CreateAoeManafontBridgeCandidate(input)
+            : null;
+        var manafontCandidate = aoeManafontBridgeCandidate ?? offGcdCandidate;
         var holdGcdForTranspose =
             Level100AbilityResolvers.ShouldHoldGcdForTranspose(input);
         var bridgeManafontThroughAlways =
             Level100AbilityResolvers.ShouldBridgeManafontThroughAlways(
                 input,
                 gcdCandidate,
-                offGcdCandidate);
+                manafontCandidate);
+        if (bridgeManafontThroughAlways && input.Context.IsAoeMode)
+        {
+            gcdCandidate = null;
+            alwaysCandidate = null;
+            offGcdCandidate = manafontCandidate;
+        }
         return CreateFrame(
             input,
             gcdCandidate,
@@ -161,9 +186,12 @@ public static class Level100ResolverEngine
         var remainingWeaves = Math.Max(0, effectiveCapacity - Math.Max(0, input.UsedWeaves));
         var blockReason = BuildBlockReason(input);
         var gcdBlockedByTransposeHold = holdGcdForTranspose
-            && gcdCandidate is { ResolverId: "GCD.单体100" }
-            && gcdCandidate.ActionId
-                == Level100ResolverFacts.EffectiveActionId(input, BLMSkill.冰封);
+            && (input.Context.IsAoeMode
+                || gcdCandidate is { ResolverId: "GCD.单体100" }
+                    && gcdCandidate.ActionId
+                        == Level100ResolverFacts.EffectiveActionId(
+                            input,
+                            BLMSkill.冰封));
 
         return new BlmDecisionFrame
         {
@@ -186,7 +214,8 @@ public static class Level100ResolverEngine
 
     private static BlmResolverCandidate? EvaluateChannel(
         BlmResolverInput input,
-        BlmResolverChannel channel)
+        BlmResolverChannel channel,
+        uint allowedGcdActionId = 0)
     {
         foreach (var entry in Manifest)
         {
@@ -204,6 +233,13 @@ public static class Level100ResolverEngine
                 continue;
             }
 
+            if (channel == BlmResolverChannel.Gcd
+                && allowedGcdActionId != 0
+                && result.ActionId != allowedGcdActionId)
+            {
+                continue;
+            }
+
             return new BlmResolverCandidate
             {
                 ActionId = result.ActionId,
@@ -216,6 +252,52 @@ public static class Level100ResolverEngine
         }
 
         return null;
+    }
+
+    private static BlmResolverCandidate? EvaluateGcdChannel(
+        BlmResolverInput input,
+        BlmAoeTransposePlan aoePlan)
+    {
+        if (input.Context.IsSingleTargetMode)
+        {
+            return EvaluateChannel(input, BlmResolverChannel.Gcd);
+        }
+
+        if (aoePlan.Disposition is BlmAoeTransposeDisposition.CastNow
+            or BlmAoeTransposeDisposition.Hold)
+        {
+            return null;
+        }
+
+        if (aoePlan.Disposition == BlmAoeTransposeDisposition.Fill
+            && Level100ResolverFacts.RecentlyUsed(input, aoePlan.FillActionId))
+        {
+            return null;
+        }
+
+        return EvaluateChannel(
+            input,
+            BlmResolverChannel.Gcd,
+            aoePlan.Disposition == BlmAoeTransposeDisposition.Fill
+                ? aoePlan.FillActionId
+                : 0);
+    }
+
+    private static BlmResolverCandidate? CreateAoeManafontBridgeCandidate(
+        BlmResolverInput input)
+    {
+        var result = Level100AbilityResolvers.CheckManafontForAoeAlwaysBridge(input);
+        return !result.IsAccepted
+            ? null
+            : new BlmResolverCandidate
+            {
+                ActionId = result.ActionId,
+                TargetId = result.TargetId,
+                TargetKind = result.TargetKind,
+                ResolverId = "Ability.墨泉",
+                ManifestOrder = 27,
+                CheckCode = result.CheckCode,
+            };
     }
 
     private static string BuildBlockReason(BlmResolverInput input)

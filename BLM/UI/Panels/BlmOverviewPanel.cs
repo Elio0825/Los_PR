@@ -4,70 +4,85 @@ using Dalamud.Bindings.ImGui;
 using LosPr.BLM.UI.Components;
 using LosPr.BLM.UI.Layout;
 using LosPr.BLM.UI.Theme;
-using PromeRotation.Data;
 
 namespace LosPr.BLM.UI.Panels;
 
-public static class BlmOverviewPanel
+internal static class BlmOverviewPanel
 {
-    public static void Draw(BlmUiSnapshot snapshot, float scale, bool reduceMotion)
+    private static string? _modeFeedback;
+    private static DateTime _modeFeedbackUntilUtc;
+
+    public static void Draw(
+        BlackMageSettingsStore store,
+        BlmUiSnapshot snapshot,
+        float scale,
+        bool reduceMotion)
     {
-        DrawRunControl(snapshot, scale, reduceMotion);
-        DrawAdaptivePair(
-            "overview_resources",
+        DrawModeSelection(store, scale, reduceMotion);
+        DrawOverviewGrid(
             () => DrawResources(snapshot, scale),
             () => DrawTiming(snapshot, scale),
-            scale);
-        DrawAdaptivePair(
-            "overview_context",
             () => DrawTarget(snapshot, scale),
             () => DrawEngineStatus(snapshot, scale),
             scale);
     }
 
-    private static void DrawRunControl(BlmUiSnapshot snapshot, float scale, bool reduceMotion)
+    private static void DrawModeSelection(
+        BlackMageSettingsStore store,
+        float scale,
+        bool reduceMotion)
     {
+        var stackButtons = ImGui.GetContentRegionAvail().X < 540f * scale;
         LosCard.Draw(
-            "overview_run_control",
+            "overview_mode_selection",
             () =>
             {
-                var tone = snapshot.AcrState switch
-                {
-                    AcrState.On => LosStatusTone.Success,
-                    AcrState.Hold => LosStatusTone.Warning,
-                    _ => LosStatusTone.Neutral,
-                };
-                LosComponents.StatusPill($"ACR {snapshot.AcrStateLabel}", tone, scale);
-                ImGui.SameLine();
-                LosComponents.StatusPill(
-                    snapshot.InCombat ? "战斗中" : "非战斗",
-                    snapshot.InCombat ? LosStatusTone.Danger : LosStatusTone.Neutral,
-                    scale);
-
-                ImGui.Dummy(new Vector2(0f, 10f * scale));
+                var mode = store.Settings.CombatMode;
                 var gap = 8f * scale;
                 var available = ImGui.GetContentRegionAvail().X;
-                var buttonWidth = Math.Max(96f * scale, (available - gap * 2f) / 3f);
-                var size = new Vector2(buttonWidth, 36f * scale);
+                var stack = stackButtons;
+                var buttonWidth = stack
+                    ? available
+                    : Math.Max(120f * scale, (available - gap * 2f) / 3f);
+                var size = new Vector2(buttonWidth, 34f * scale);
 
                 if (LosComponents.SegmentButton(
-                        "acr_on", "On 开启", snapshot.AcrState == AcrState.On,
-                        size, scale, reduceMotion, "允许 PR 调用当前 ACR 的决策入口。"))
-                    SetAcrState(AcrState.On);
-                ImGui.SameLine(0f, gap);
+                        "mode_daily", "日常预设", mode == BlmConsoleMode.Daily,
+                        size, scale, reduceMotion, "适用于日随与随机任务；应用日常 QT 默认组合。"))
+                {
+                    ApplyModePreset(store, BlmConsoleMode.Daily, "已切换日常预设");
+                }
+
+                if (!stack)
+                    ImGui.SameLine(0f, gap);
                 if (LosComponents.SegmentButton(
-                        "acr_hold", "Hold 保持", snapshot.AcrState == AcrState.Hold,
-                        size, scale, reduceMotion, "暂时停止 ACR 决策，保留当前设置。"))
-                    SetAcrState(AcrState.Hold);
-                ImGui.SameLine(0f, gap);
-                if (LosComponents.SegmentButton(
-                        "acr_off", "Off 关闭", snapshot.AcrState == AcrState.Off,
-                        size, scale, reduceMotion, "关闭 PR 的 ACR 调度。"))
-                    SetAcrState(AcrState.Off);
+                        "mode_high_end", "高难预设", mode == BlmConsoleMode.HighEnd,
+                        size, scale, reduceMotion, "适用于高难副本；应用高难 QT 默认组合。"))
+                {
+                    ApplyModePreset(store, BlmConsoleMode.HighEnd, "已切换高难预设");
+                }
+
+                if (!stack)
+                    ImGui.SameLine(0f, gap);
+                if (LosComponents.SecondaryButton(
+                        "mode_restore",
+                        "恢复默认设置",
+                        size: size,
+                        scale: scale,
+                        tooltip: "恢复当前模式的 QT 默认值。"))
+                {
+                    ApplyModePreset(store, mode, "已恢复当前模式默认");
+                }
+
+                if (_modeFeedback is not null && DateTime.UtcNow <= _modeFeedbackUntilUtc)
+                {
+                    ImGui.Dummy(new Vector2(0f, 6f * scale));
+                    LosComponents.StatusPill(_modeFeedback, LosStatusTone.Success, scale);
+                }
             },
-            "运行控制",
-            "直接控制 PR 全局 ACR 状态",
-            height: 155f,
+            "模式书签",
+            "切换预设会立即更新 QT；起手方案在“战斗”页单独选择",
+            height: stackButtons ? 235f : 132f,
             scale: scale);
     }
 
@@ -112,7 +127,7 @@ public static class BlmOverviewPanel
             },
             "元素资源",
             snapshot.IsAvailable ? $"Lv.{snapshot.Level}" : snapshot.AvailabilityText,
-            height: 295f,
+            height: 280f,
             scale: scale);
     }
 
@@ -158,7 +173,7 @@ public static class BlmOverviewPanel
             },
             "调度时序",
             "只读采样，不干预技能队列",
-            height: 250f,
+            height: 280f,
             scale: scale);
     }
 
@@ -187,7 +202,7 @@ public static class BlmOverviewPanel
             },
             "当前目标",
             snapshot.InCombat ? "战斗状态已建立" : "等待进入战斗",
-            height: 220f,
+            height: 280f,
             scale: scale);
     }
 
@@ -238,59 +253,88 @@ public static class BlmOverviewPanel
                         BlmPanelPrimitives.DrawMuted(snapshot.CaptureError);
                 }
             },
-            "智能引擎",
-            "事实层状态；当前不会生成技能决策",
-            height: 320f,
+            "循环状态",
+            "资源跟踪、动作回执与状态代次",
+            height: 280f,
             scale: scale);
     }
 
-    private static void DrawAdaptivePair(
-        string id,
-        Action left,
-        Action right,
+    private static void DrawOverviewGrid(
+        Action topLeft,
+        Action topRight,
+        Action bottomLeft,
+        Action bottomRight,
         float scale)
     {
         var available = ImGui.GetContentRegionAvail().X;
-        if (available < 720f * scale)
+        if (available < 760f * scale)
         {
-            left();
-            right();
+            topLeft();
+            topRight();
+            bottomLeft();
+            bottomRight();
             return;
         }
 
-        if (!ImGui.BeginTable($"##{id}", 2,
-                ImGuiTableFlags.SizingStretchSame | ImGuiTableFlags.NoSavedSettings))
-            return;
-
+        ImGui.PushStyleVar(
+            ImGuiStyleVar.CellPadding,
+            LosMetrics.Scale(new Vector2(8f, 0f), scale));
         try
         {
-            ImGui.TableNextColumn();
-            left();
-            ImGui.TableNextColumn();
-            right();
+            if (!ImGui.BeginTable(
+                    "##overview_four_card_grid",
+                    2,
+                    ImGuiTableFlags.SizingStretchSame | ImGuiTableFlags.NoSavedSettings))
+            {
+                return;
+            }
+
+            try
+            {
+                ImGui.TableNextRow();
+                ImGui.TableNextColumn();
+                topLeft();
+                ImGui.TableNextColumn();
+                topRight();
+
+                ImGui.TableNextRow();
+                ImGui.TableNextColumn();
+                bottomLeft();
+                ImGui.TableNextColumn();
+                bottomRight();
+            }
+            finally
+            {
+                ImGui.EndTable();
+            }
         }
         finally
         {
-            ImGui.EndTable();
+            ImGui.PopStyleVar();
         }
     }
 
-    private static void SetAcrState(AcrState state)
+    private static void ApplyModePreset(
+        BlackMageSettingsStore store,
+        BlmConsoleMode mode,
+        string feedback)
     {
-        try
+        foreach (var (key, value) in BlackMageRotation.PresetFor(mode))
         {
-            PromeSettings.Instance.EnableAcr = state;
+            BlmPanelPrimitives.SafeSetQt(key, value, store);
         }
-        catch
-        {
-            // PR 尚未完成初始化时保持 UI 可用，下一帧继续读取。
-        }
+
+        store.Update(settings => BlackMageRotation.ApplyModeDefaults(settings, mode));
+        _modeFeedback = feedback;
+        _modeFeedbackUntilUtc = DateTime.UtcNow.AddSeconds(2.5);
     }
 
     private static string FormatAck(BlmUiSnapshot snapshot)
     {
         if (snapshot.LastAckActionId == 0)
+        {
             return "暂无";
+        }
 
         var sequence = snapshot.LastAckSequence == 0
             ? "无序列"

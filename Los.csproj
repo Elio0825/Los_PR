@@ -16,6 +16,8 @@
 
   <ItemGroup>
     <Compile Remove="Tests\**\*.cs" />
+    <EmbeddedResource Include="BLM\UI\Assets\BlackCatFamiliar.png"
+                      LogicalName="LosPr.BLM.UI.Assets.BlackCatFamiliar.png" />
   </ItemGroup>
 
   <ItemGroup>

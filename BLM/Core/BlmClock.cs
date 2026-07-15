@@ -1,11 +1,11 @@
 namespace LosPr.BLM.Core;
 
-public interface IBlmClock
+internal interface IBlmClock
 {
     long NowMs { get; }
 }
 
-public sealed class SystemBlmClock : IBlmClock
+internal sealed class SystemBlmClock : IBlmClock
 {
     public static SystemBlmClock Instance { get; } = new();
 

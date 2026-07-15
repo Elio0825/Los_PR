@@ -1,11 +1,11 @@
 namespace LosPr.BLM.Diagnostics;
 
-public interface IBlmDebugSink
+internal interface IBlmDebugSink
 {
     void Publish(BlmDebugEventDraft draft);
 }
 
-public interface IBlmDebugViewSource
+internal interface IBlmDebugViewSource
 {
     BlmDebugSnapshot GetSnapshot();
 
@@ -14,7 +14,7 @@ public interface IBlmDebugViewSource
     bool TryOpenLogDirectory();
 }
 
-public sealed class NullBlmDebugSink : IBlmDebugSink
+internal sealed class NullBlmDebugSink : IBlmDebugSink
 {
     public static NullBlmDebugSink Instance { get; } = new();
 
@@ -27,7 +27,7 @@ public sealed class NullBlmDebugSink : IBlmDebugSink
     }
 }
 
-public sealed class NullBlmDebugViewSource : IBlmDebugViewSource
+internal sealed class NullBlmDebugViewSource : IBlmDebugViewSource
 {
     public static NullBlmDebugViewSource Instance { get; } = new();
 

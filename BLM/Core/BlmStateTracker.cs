@@ -2,10 +2,13 @@ using System.Collections.Immutable;
 
 namespace LosPr.BLM.Core;
 
-public sealed class BlmStateTracker
+internal sealed class BlmStateTracker
 {
     private const int SeenSequenceCapacity = 4096;
     private const long ZeroSequenceDedupeWindowMs = 150;
+    private const long HardcastStartTimeoutMs = 750;
+    private const long HardcastCompletionAckGraceMs = 250;
+    private const float HardcastCompletionRemainThresholdSeconds = 0.15f;
     public const long ManafontReconcileTimeoutMs = 1500;
     public const int AcknowledgedActionHistoryCapacity = 256;
     public const int ZeroSequenceDedupeCapacity = 256;
@@ -33,6 +36,9 @@ public sealed class BlmStateTracker
     private BlmActionEffectAck? _lastAckAwaitingGauge;
     private PendingManafontSync? _pendingManafont;
     private BlmIssuedActionMetadata? _pendingIssuedAction;
+    private bool _pendingHardcastObserved;
+    private float _pendingHardcastLastRemainSeconds;
+    private long _pendingHardcastEndedAtMs;
 
     private long _combatSerial;
     private long _stateGeneration;
@@ -185,6 +191,7 @@ public sealed class BlmStateTracker
             }
 
             _pendingIssuedAction = metadata;
+            ResetPendingHardcastObservationNoLock();
             return true;
         }
     }
@@ -193,7 +200,7 @@ public sealed class BlmStateTracker
     {
         lock (_gate)
         {
-            _pendingIssuedAction = null;
+            ClearPendingIssuedActionNoLock();
         }
     }
 
@@ -312,7 +319,9 @@ public sealed class BlmStateTracker
                 UpdateGcdStartedAtNoLock(context);
             }
 
-            ExpireIssuedActionNoLock(_clock.NowMs);
+            var nowMs = _clock.NowMs;
+            ReconcilePendingHardcastNoLock(context, nowMs);
+            ExpireIssuedActionNoLock(nowMs);
 
             if (_lastAckAwaitingGauge is { } genericAck
                 && genericAck.StateGeneration == _stateGeneration)
@@ -582,7 +591,7 @@ public sealed class BlmStateTracker
         _lastGaugeReconciledAtMs = 0;
         _lastAckAwaitingGauge = null;
         _pendingManafont = null;
-        _pendingIssuedAction = null;
+        ClearPendingIssuedActionNoLock();
         _seenSequences.Clear();
         _seenSequenceOrder.Clear();
         _lastZeroSequenceByAction.Clear();
@@ -792,7 +801,7 @@ public sealed class BlmStateTracker
         if (pending.StateGeneration != _stateGeneration
             || ack.ReceivedAtMs > pending.DeadlineAtMs)
         {
-            _pendingIssuedAction = null;
+            ClearPendingIssuedActionNoLock();
             return null;
         }
 
@@ -813,7 +822,7 @@ public sealed class BlmStateTracker
             && ack.ObservedGcdStartedAtMs < pending.IssuedAtMs;
         if (actionMatches && !gcdStartedBeforeIssue)
         {
-            _pendingIssuedAction = null;
+            ClearPendingIssuedActionNoLock();
             return pending;
         }
 
@@ -822,7 +831,7 @@ public sealed class BlmStateTracker
         var sameChannelOgcdSupersedesPending = isTrackedOgcd && !pending.IsGcd;
         if (newGcdSupersedesPending || sameChannelOgcdSupersedesPending)
         {
-            _pendingIssuedAction = null;
+            ClearPendingIssuedActionNoLock();
         }
 
         return null;
@@ -834,8 +843,79 @@ public sealed class BlmStateTracker
             && (pending.StateGeneration != _stateGeneration
                 || nowMs > pending.DeadlineAtMs))
         {
-            _pendingIssuedAction = null;
+            ClearPendingIssuedActionNoLock();
         }
+    }
+
+    private void ReconcilePendingHardcastNoLock(
+        BlmContext context,
+        long nowMs)
+    {
+        if (_pendingIssuedAction is not { IsGcd: true, WasInstant: false } pending)
+        {
+            ResetPendingHardcastObservationNoLock();
+            return;
+        }
+
+        var isMatchingHardcast = context.IsCasting
+            && context.CurrentCastingActionId != 0
+            && (BlmSkillBook.ActionIdsMatch(
+                    pending.RequestedId,
+                    context.CurrentCastingActionId,
+                    _normalizer)
+                || BlmSkillBook.ActionIdsMatch(
+                    pending.AdjustedAtIssue,
+                    context.CurrentCastingActionId,
+                    _normalizer));
+        if (isMatchingHardcast)
+        {
+            _pendingHardcastObserved = true;
+            _pendingHardcastLastRemainSeconds =
+                Math.Max(0f, context.CastRemainSeconds);
+            _pendingHardcastEndedAtMs = 0;
+            return;
+        }
+
+        if (!_pendingHardcastObserved)
+        {
+            if (nowMs - pending.IssuedAtMs >= HardcastStartTimeoutMs)
+            {
+                ClearPendingIssuedActionNoLock();
+            }
+
+            return;
+        }
+
+        if (_pendingHardcastLastRemainSeconds
+            > HardcastCompletionRemainThresholdSeconds)
+        {
+            ClearPendingIssuedActionNoLock();
+            return;
+        }
+
+        if (_pendingHardcastEndedAtMs == 0)
+        {
+            _pendingHardcastEndedAtMs = nowMs;
+            return;
+        }
+
+        if (nowMs - _pendingHardcastEndedAtMs >= HardcastCompletionAckGraceMs)
+        {
+            ClearPendingIssuedActionNoLock();
+        }
+    }
+
+    private void ClearPendingIssuedActionNoLock()
+    {
+        _pendingIssuedAction = null;
+        ResetPendingHardcastObservationNoLock();
+    }
+
+    private void ResetPendingHardcastObservationNoLock()
+    {
+        _pendingHardcastObserved = false;
+        _pendingHardcastLastRemainSeconds = 0f;
+        _pendingHardcastEndedAtMs = 0;
     }
 
     private void RecordActionSuccessNoLock(

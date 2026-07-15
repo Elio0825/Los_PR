@@ -4,20 +4,26 @@ using LosPr.BLM.Resolvers.Level100;
 
 namespace LosPr.BLM.Resolvers.Production;
 
-public sealed record BlmResolverProductionFrame
+internal sealed record BlmResolverProductionFrame
 {
     public long FrameSequence { get; init; }
     public long StateGeneration { get; init; }
     public long CapturedAtMs { get; init; }
     public uint PlayerEntityId { get; init; }
+    public bool IsAoeMode { get; init; }
+    public int EnemyCount { get; init; }
     public uint TargetEntityId { get; init; }
+    public uint AoeTargetId { get; init; }
+    public bool AoeTargetCanUseAttack { get; init; }
+    public int AoeTargetHitCount { get; init; }
+    public bool AoeTargetIsCurrentTarget { get; init; }
     public bool HasTarget { get; init; }
     public bool HasValidTarget { get; init; }
     public BlmResolverInput Input { get; init; } = new();
     public BlmDecisionFrame Decision { get; init; } = new();
 }
 
-public sealed class BlmResolverExecutionService
+internal sealed class BlmResolverExecutionService
 {
     public const int HeartbeatIntervalMs = 5000;
     private const long OgcdAckTimeoutMs = 2000;
@@ -69,10 +75,15 @@ public sealed class BlmResolverExecutionService
         List<BlmDebugEventDraft>? drafts = null;
         lock (_gate)
         {
-            var targetChanged = _latest is { } previous
+            var primaryTargetChanged = _latest is { } previous
                 && (previous.TargetEntityId != context.TargetEntityId
                     || previous.HasTarget != context.HasTarget
                     || previous.HasValidTarget != context.HasValidTarget);
+            var aoeDeliveryTargetChanged = _latest is { } aoePrevious
+                && (aoePrevious.IsAoeMode != context.IsAoeMode
+                    || aoePrevious.AoeTargetId != context.AoeTargetId
+                    || aoePrevious.AoeTargetCanUseAttack
+                        && !context.AoeTargetCanUseAttack);
             if (!IsSameFrameFacts(context, input))
             {
                 _latest = null;
@@ -81,7 +92,11 @@ public sealed class BlmResolverExecutionService
                 return false;
             }
 
-            if (targetChanged)
+            if (primaryTargetChanged && HasPendingTargetDependentAction())
+            {
+                _tracker.CancelIssuedAction();
+            }
+            else if (aoeDeliveryTargetChanged && HasPendingAoeTargetedGcd())
             {
                 _tracker.CancelIssuedAction();
             }
@@ -92,7 +107,13 @@ public sealed class BlmResolverExecutionService
                 StateGeneration = context.Tracker.StateGeneration,
                 CapturedAtMs = context.CapturedAtMs,
                 PlayerEntityId = context.PlayerEntityId,
+                IsAoeMode = context.IsAoeMode,
+                EnemyCount = context.EnemyCount,
                 TargetEntityId = context.TargetEntityId,
+                AoeTargetId = context.AoeTargetId,
+                AoeTargetCanUseAttack = context.AoeTargetCanUseAttack,
+                AoeTargetHitCount = context.AoeTargetHitCount,
+                AoeTargetIsCurrentTarget = context.AoeTargetIsCurrentTarget,
                 HasTarget = context.HasTarget,
                 HasValidTarget = context.HasValidTarget,
                 Input = input,
@@ -220,6 +241,20 @@ public sealed class BlmResolverExecutionService
             && (frame.Decision.RemainingWeaves > 0
                 || context.GcdRemainSeconds <= 0.6f);
 
+    private bool HasPendingAoeTargetedGcd()
+    {
+        var snapshot = _tracker.GetTrackerSnapshot();
+        return snapshot.HasPendingIssuedAction
+            && BlmSkillBook.IsAoeTargetedGcdId(snapshot.PendingIssuedActionId);
+    }
+
+    private bool HasPendingTargetDependentAction()
+    {
+        var snapshot = _tracker.GetTrackerSnapshot();
+        return snapshot.HasPendingIssuedAction
+            && !BlmSkillBook.IsKnownSelfAbilityId(snapshot.PendingIssuedActionId);
+    }
+
     private static bool CanDeliverOffGcd(BlmContext context)
         => BlmDecisionPrimitives.CanWeaveNow(
             context.IsCasting,
@@ -243,7 +278,8 @@ public sealed class BlmResolverExecutionService
 
     private static bool PredictInstant(BlmContext context, uint actionId)
         => actionId is BLMSkill.闪雷 or BLMSkill.暴雷 or BLMSkill.高闪雷
-            or BLMSkill.悖论 or BLMSkill.异言
+            or BLMSkill.震雷 or BLMSkill.霹雷 or BLMSkill.高震雷
+            or BLMSkill.悖论 or BLMSkill.异言 or BLMSkill.秽浊
             || actionId == BLMSkill.绝望 && context.Level >= 100
             || actionId == BLMSkill.爆炎 && context.HasFirestarter
             || context.HasSwiftcast
@@ -384,7 +420,13 @@ public sealed class BlmResolverExecutionService
             '|',
             frame.StateGeneration,
             frame.PlayerEntityId,
+            frame.IsAoeMode,
+            frame.EnemyCount,
             frame.TargetEntityId,
+            frame.AoeTargetId,
+            frame.AoeTargetCanUseAttack,
+            frame.AoeTargetHitCount,
+            frame.AoeTargetIsCurrentTarget,
             frame.HasTarget,
             frame.HasValidTarget,
             CandidateFingerprint(frame.Decision.GcdCandidate),
@@ -424,7 +466,13 @@ public sealed class BlmResolverExecutionService
             && frame.StateGeneration == context.Tracker.StateGeneration
             && frame.CapturedAtMs == context.CapturedAtMs
             && frame.PlayerEntityId == context.PlayerEntityId
+            && frame.IsAoeMode == context.IsAoeMode
+            && frame.EnemyCount == context.EnemyCount
             && frame.TargetEntityId == context.TargetEntityId
+            && frame.AoeTargetId == context.AoeTargetId
+            && frame.AoeTargetCanUseAttack == context.AoeTargetCanUseAttack
+            && frame.AoeTargetHitCount == context.AoeTargetHitCount
+            && frame.AoeTargetIsCurrentTarget == context.AoeTargetIsCurrentTarget
             && frame.HasTarget == context.HasTarget
             && frame.HasValidTarget == context.HasValidTarget;
 
@@ -438,7 +486,14 @@ public sealed class BlmResolverExecutionService
             && input.FactCoverage.GenerationConsistent
             && input.Context.CapturedAtMs == context.CapturedAtMs
             && input.Context.PlayerEntityId == context.PlayerEntityId
+            && input.Context.IsSingleTargetMode == !context.IsAoeMode
+            && input.Context.EnemyCount == context.EnemyCount
             && input.Context.CurrentTargetId == context.TargetEntityId
+            && input.Context.AoeTargetId == context.AoeTargetId
+            && input.Context.AoeTargetCanUseAttack == context.AoeTargetCanUseAttack
+            && input.Context.AoeTargetHitCount == context.AoeTargetHitCount
+            && input.Context.AoeTargetIsCurrentTarget
+                == context.AoeTargetIsCurrentTarget
             && input.Context.HasTarget == context.HasTarget
             && input.Context.CanUseAttackActionOnTarget == context.HasValidTarget
             && HasMatchingTargetFact(context, input)

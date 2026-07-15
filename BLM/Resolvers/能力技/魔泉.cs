@@ -3,6 +3,15 @@ namespace LosPr.BLM.Resolvers.Level100;
 internal static partial class Level100AbilityResolvers
 {
     private static BlmResolverCheckResult CheckManafont(BlmResolverInput input)
+        => CheckManafont(input, allowAoeAlwaysBridge: false);
+
+    internal static BlmResolverCheckResult CheckManafontForAoeAlwaysBridge(
+        BlmResolverInput input)
+        => CheckManafont(input, allowAoeAlwaysBridge: true);
+
+    private static BlmResolverCheckResult CheckManafont(
+        BlmResolverInput input,
+        bool allowAoeAlwaysBridge)
     {
         var context = input.Context;
         if (!context.InFire)
@@ -40,7 +49,9 @@ internal static partial class Level100AbilityResolvers
             return BlmResolverCheckResult.Reject(-8);
         }
 
-        if (context.IsAoeMode && context.GcdRemainMs < 500d)
+        if (context.IsAoeMode
+            && context.GcdRemainMs < 500d
+            && !allowAoeAlwaysBridge)
         {
             return BlmResolverCheckResult.Reject(-9);
         }
@@ -80,7 +91,23 @@ internal static partial class Level100AbilityResolvers
     {
         if (input.Context.IsAoeMode)
         {
-            return false;
+            var aoeContext = input.Context;
+            var followsAoeFinisher =
+                Level100ResolverFacts.PreviousGcdMatches(input, BLMSkill.核爆)
+                || Level100ResolverFacts.PreviousGcdMatches(input, BLMSkill.耀星);
+            return offGcdCandidate is { ResolverId: "Ability.墨泉" }
+                && aoeContext.InFire
+                && aoeContext.AstralFireStacks == 3
+                && aoeContext.Mp < 800
+                && input.Settings.ManafontEnabled
+                && (aoeContext.Level < 100 || aoeContext.AstralSoulStacks != 6)
+                && followsAoeFinisher
+                && !aoeContext.IsCasting
+                && aoeContext.AnimationLockSeconds <= 0f
+                && !BlmDecisionPrimitives.CanWeaveNow(
+                    aoeContext.IsCasting,
+                    aoeContext.GcdRemainSeconds,
+                    aoeContext.AnimationLockSeconds);
         }
 
         if (offGcdCandidate is not { ResolverId: "Ability.墨泉" })

@@ -1,6 +1,7 @@
 using System.Collections.Immutable;
 using LosPr.BLM.Core;
 using LosPr.BLM.Resolvers;
+using LosPr.BLM.Resolvers.Level100;
 using LosPr.BLM.Resolvers.Production;
 using PromeRotation.Data;
 
@@ -17,6 +18,7 @@ internal static class ResolverExecutionTests
         OffGcdWaitsForActualWeaveWindow();
         ManafontBridgeDeliversAfterHardcast();
         TargetSwitchCancelsOldPending();
+        TargetSwitchPreservesSelfAbilityPending();
         HighPriorityAndFrameDriftFailClosed();
         ManualRecoveryAlwaysWorksWithoutPreviousGcd();
         IceParadoxTriplecastBlizzard3SequenceIsDeliverable();
@@ -24,6 +26,8 @@ internal static class ResolverExecutionTests
         Level1To89CandidatesAreDeliveredInProduction();
         Level60IceAckAheadOfGaugeDeliversBlizzardFour();
         AoeSharedAbilitiesAreDeliveredWithoutGcdLeak();
+        AoePendingCancellationFollowsDeliveryTargetContract();
+        AoeManafontAlwaysBridgeIsSingleDelivery();
     }
 
     private static void SameFrameAndPendingPreventDuplicateDelivery()
@@ -411,6 +415,70 @@ internal static class ResolverExecutionTests
             switched.TargetEntityId);
     }
 
+    private static void TargetSwitchPreservesSelfAbilityPending()
+    {
+        var context = TestContext.Base() with
+        {
+            IsAoeMode = true,
+            EnemyCount = 3,
+            AoeTargetId = 200,
+            AoeTargetCanUseAttack = true,
+            AoeTargetHitCount = 3,
+            AoeTargetIsCurrentTarget = true,
+            GcdRemainSeconds = 0.7f,
+        };
+        var fixture = CreateFixture(context);
+        var previous = Success(
+            fixture.Context.Tracker.StateGeneration,
+            BLMSkill.高冰冻,
+            wasInstant: true);
+        var settings = BlmResolverSettings.Default with
+        {
+            TtkEnabled = true,
+            ManafontEnabled = false,
+            DotEnabled = false,
+            AmplifierEnabled = false,
+            LeyLinesEnabled = false,
+            AutoMitigationEnabled = false,
+        };
+        var input = Input(
+            fixture.Context,
+            settings,
+            [Ready(MageUniversalSkill.即刻咏唱)],
+            previous);
+        AssertEx.True(
+            fixture.Execution.BeginFrame(fixture.Context, input),
+            "即刻Self Pending首帧应建立");
+        AssertAction(
+            fixture.Execution.Resolve(
+                BlmResolverChannel.OffGcd,
+                fixture.Context),
+            MageUniversalSkill.即刻咏唱,
+            ActionType.OffGcd,
+            0);
+
+        fixture.Clock.Advance(1);
+        var switched = fixture.Context with
+        {
+            CapturedAtMs = fixture.Clock.NowMs,
+            TargetEntityId = 300,
+        };
+        var switchedInput = Input(
+            switched,
+            settings,
+            [Ready(MageUniversalSkill.即刻咏唱)],
+            previous);
+        AssertEx.True(
+            fixture.Execution.BeginFrame(switched, switchedInput),
+            "主目标切换后即刻帧必须重建");
+        AssertEx.True(
+            fixture.Tracker.GetTrackerSnapshot().HasPendingIssuedAction,
+            "主目标切换不得取消Self即刻Pending");
+        AssertEx.True(
+            fixture.Execution.Resolve(BlmResolverChannel.OffGcd, switched) is null,
+            "主目标切换后即刻Pending必须阻止Ack前重复交付");
+    }
+
     private static void ManualRecoveryAlwaysWorksWithoutPreviousGcd()
     {
         var context = TestContext.Base() with
@@ -632,6 +700,10 @@ internal static class ResolverExecutionTests
         {
             IsAoeMode = true,
             EnemyCount = 3,
+            AoeTargetId = 200,
+            AoeTargetCanUseAttack = true,
+            AoeTargetHitCount = 3,
+            AoeTargetIsCurrentTarget = true,
             Phase = BlmPhase.Ice,
             AfStacks = 0,
             IceStacks = 1,
@@ -649,7 +721,7 @@ internal static class ResolverExecutionTests
                 LeyLinesEnabled = false,
                 AutoMitigationEnabled = false,
             },
-            [Ready(BLMSkill.星灵移位)]);
+            [Ready(BLMSkill.星灵移位), Ready(BLMSkill.玄冰)]);
         AssertEx.True(
             transposeFixture.Execution.BeginFrame(
                 transposeFixture.Context,
@@ -659,11 +731,30 @@ internal static class ResolverExecutionTests
             transposeFixture.Execution.Resolve(
                 BlmResolverChannel.Gcd,
                 transposeFixture.Context) is null,
-            "AOE生产帧不得泄漏GCD");
+            "UI1加三冰针不得重复玄冰");
         AssertAction(
             transposeFixture.Execution.Resolve(
                 BlmResolverChannel.Always,
                 transposeFixture.Context),
+            BLMSkill.星灵移位,
+            ActionType.Always,
+            0);
+
+        var completeIceContext = transposeContext with { IceStacks = 3 };
+        var completeIceFixture = CreateFixture(completeIceContext);
+        var completeIceInput = Input(
+            completeIceFixture.Context,
+            transposeInput.Settings,
+            [Ready(BLMSkill.星灵移位)]);
+        AssertEx.True(
+            completeIceFixture.Execution.BeginFrame(
+                completeIceFixture.Context,
+                completeIceInput),
+            "AOE完整冰相星灵生产帧应建立");
+        AssertAction(
+            completeIceFixture.Execution.Resolve(
+                BlmResolverChannel.Always,
+                completeIceFixture.Context),
             BLMSkill.星灵移位,
             ActionType.Always,
             0);
@@ -794,6 +885,396 @@ internal static class ResolverExecutionTests
             "AOE Manafont Pending期间不得重复交付");
     }
 
+    private static void AoePendingCancellationFollowsDeliveryTargetContract()
+    {
+        var context = TestContext.Base() with
+        {
+            IsAoeMode = true,
+            EnemyCount = 3,
+            AoeTargetId = 201,
+            AoeTargetCanUseAttack = true,
+            AoeTargetHitCount = 3,
+            AoeTargetIsCurrentTarget = false,
+            Level = 100,
+            Phase = BlmPhase.Neutral,
+            GcdRemainSeconds = 0.2f,
+        };
+        var fixture = CreateFixture(context);
+        var input = Input(
+            fixture.Context,
+            BlmResolverSettings.Default with
+            {
+                ManafontEnabled = false,
+                DotEnabled = false,
+                MoveXenoglossyEnabled = false,
+                AmplifierEnabled = false,
+                LeyLinesEnabled = false,
+                AutoMitigationEnabled = false,
+            },
+            [Ready(BLMSkill.冰冻)]);
+        AssertEx.True(fixture.Execution.BeginFrame(fixture.Context, input), "AOE指定中心生产帧应建立");
+        var initialFrameSequence = fixture.Execution.GetSnapshot()!.FrameSequence;
+        var candidate = fixture.Execution.GetSnapshot()!.Decision.GcdCandidate;
+        AssertEx.True(candidate is not null, "AOE指定中心必须产生GCD候选");
+        AssertEx.Equal(BlmResolverTargetKind.SpecifiedTarget, candidate!.TargetKind, "AOE指定中心TargetKind错误");
+        AssertAction(
+            fixture.Execution.Resolve(BlmResolverChannel.Gcd, fixture.Context),
+            BLMSkill.冰冻,
+            ActionType.Gcd,
+            201);
+        AssertEx.True(fixture.Tracker.GetTrackerSnapshot().HasPendingIssuedAction, "AOE指定中心交付后必须建立Pending");
+
+        fixture.Clock.Advance(1);
+        var drifted = fixture.Context with
+        {
+            CapturedAtMs = fixture.Clock.NowMs,
+            AoeTargetId = 202,
+        };
+        var driftedInput = Input(
+            drifted,
+            input.Settings,
+            [Ready(BLMSkill.冰冻)]);
+        AssertEx.True(fixture.Execution.BeginFrame(drifted, driftedInput), "AOE中心漂移后必须建立新帧");
+        AssertEx.True(
+            fixture.Execution.GetSnapshot()!.FrameSequence > initialFrameSequence,
+            "AOE中心漂移必须重建DecisionFrame");
+        AssertEx.False(
+            fixture.Tracker.GetTrackerSnapshot().HasPendingIssuedAction,
+            "AOE中心漂移必须取消已签发SpecifiedTarget GCD Pending");
+        AssertAction(
+            fixture.Execution.Resolve(BlmResolverChannel.Gcd, drifted),
+            BLMSkill.冰冻,
+            ActionType.Gcd,
+            202);
+
+        fixture.Clock.Advance(1);
+        var singleTarget = drifted with
+        {
+            CapturedAtMs = fixture.Clock.NowMs,
+            IsAoeMode = false,
+            EnemyCount = 1,
+            AoeTargetId = 0,
+            AoeTargetCanUseAttack = false,
+            AoeTargetHitCount = 0,
+            AoeTargetIsCurrentTarget = false,
+        };
+        var singleInput = Input(
+            singleTarget,
+            input.Settings,
+            [Ready(BLMSkill.冰封)]);
+        AssertEx.True(
+            fixture.Execution.BeginFrame(singleTarget, singleInput),
+            "AOE切回单体必须建立无残留新帧");
+        AssertEx.False(
+            fixture.Tracker.GetTrackerSnapshot().HasPendingIssuedAction,
+            "AOE切回单体必须取消已签发GCD Pending");
+
+        var geometryFixture = CreateFixture(context);
+        var geometryInput = Input(
+            geometryFixture.Context,
+            input.Settings,
+            [Ready(BLMSkill.冰冻)]);
+        AssertEx.True(
+            geometryFixture.Execution.BeginFrame(
+                geometryFixture.Context,
+                geometryInput),
+            "AOE几何漂移首帧应建立");
+        AssertAction(
+            geometryFixture.Execution.Resolve(
+                BlmResolverChannel.Gcd,
+                geometryFixture.Context),
+            BLMSkill.冰冻,
+            ActionType.Gcd,
+            201);
+        geometryFixture.Clock.Advance(1);
+        var geometryDrifted = geometryFixture.Context with
+        {
+            CapturedAtMs = geometryFixture.Clock.NowMs,
+            EnemyCount = 2,
+            AoeTargetHitCount = 2,
+        };
+        var geometryDriftedInput = Input(
+            geometryDrifted,
+            geometryInput.Settings,
+            [Ready(BLMSkill.冰冻)]);
+        AssertEx.True(
+            geometryFixture.Execution.BeginFrame(
+                geometryDrifted,
+                geometryDriftedInput),
+            "EnemyCount/HitCount漂移必须重建DecisionFrame");
+        AssertEx.True(
+            geometryFixture.Tracker.GetTrackerSnapshot().HasPendingIssuedAction,
+            "纯AOE几何漂移不得取消GCD Pending");
+        AssertEx.True(
+            geometryFixture.Execution.Resolve(
+                BlmResolverChannel.Gcd,
+                geometryDrifted) is null,
+            "纯AOE几何漂移后旧Pending必须继续阻止重复签发");
+
+        var currentTargetGcdContext = context with
+        {
+            EnemyCount = 2,
+            AoeTargetHitCount = 2,
+            Phase = BlmPhase.Ice,
+            AfStacks = 0,
+            IceStacks = 3,
+            UmbralHearts = 2,
+        };
+        var currentTargetGcdFixture = CreateFixture(currentTargetGcdContext);
+        var currentTargetGcdInput = Input(
+            currentTargetGcdFixture.Context,
+            input.Settings,
+            [Ready(BLMSkill.冰澈)]);
+        AssertEx.True(
+            currentTargetGcdFixture.Execution.BeginFrame(
+                currentTargetGcdFixture.Context,
+                currentTargetGcdInput),
+            "AOE冰澈首帧应建立");
+        AssertAction(
+            currentTargetGcdFixture.Execution.Resolve(
+                BlmResolverChannel.Gcd,
+                currentTargetGcdFixture.Context),
+            BLMSkill.冰澈,
+            ActionType.Gcd,
+            currentTargetGcdFixture.Context.TargetEntityId);
+        currentTargetGcdFixture.Clock.Advance(1);
+        var currentTargetGcdDrifted = currentTargetGcdFixture.Context with
+        {
+            CapturedAtMs = currentTargetGcdFixture.Clock.NowMs,
+            AoeTargetId = 202,
+        };
+        var currentTargetGcdDriftedInput = Input(
+            currentTargetGcdDrifted,
+            currentTargetGcdInput.Settings,
+            [Ready(BLMSkill.冰澈)]);
+        AssertEx.True(
+            currentTargetGcdFixture.Execution.BeginFrame(
+                currentTargetGcdDrifted,
+                currentTargetGcdDriftedInput),
+            "AOE中心漂移后冰澈帧必须重建");
+        AssertEx.True(
+            currentTargetGcdFixture.Tracker.GetTrackerSnapshot().HasPendingIssuedAction,
+            "AOE中心漂移不得取消当前主目标冰澈Pending");
+        AssertEx.True(
+            currentTargetGcdFixture.Execution.Resolve(
+                BlmResolverChannel.Gcd,
+                currentTargetGcdDrifted) is null,
+            "AOE中心漂移后冰澈Pending必须继续阻止重复签发");
+    }
+
+    private static void AoeManafontAlwaysBridgeIsSingleDelivery()
+    {
+        var context = TestContext.Base() with
+        {
+            IsAoeMode = true,
+            EnemyCount = 3,
+            AoeTargetId = 200,
+            AoeTargetCanUseAttack = true,
+            AoeTargetHitCount = 3,
+            AoeTargetIsCurrentTarget = true,
+            Phase = BlmPhase.Fire,
+            AfStacks = 3,
+            IceStacks = 0,
+            UmbralHearts = 0,
+            AstralSoul = 0,
+            Mp = 799,
+            IsCasting = false,
+            AnimationLockSeconds = 0f,
+            GcdRemainSeconds = 0.499f,
+        };
+        var fixture = CreateFixture(context);
+        var previous = Success(
+            fixture.Context.Tracker.StateGeneration,
+            BLMSkill.耀星,
+            wasInstant: true);
+        var input = Input(
+            fixture.Context,
+            BlmResolverSettings.Default with
+            {
+                ManafontEnabled = true,
+                TtkEnabled = true,
+                DotEnabled = false,
+                AmplifierEnabled = false,
+                LeyLinesEnabled = false,
+                AutoMitigationEnabled = false,
+            },
+            [Ready(MageUniversalSkill.即刻咏唱), Ready(BLMSkill.魔泉)],
+            previous);
+        AssertEx.Equal(
+            MageUniversalSkill.即刻咏唱,
+            Level100ResolverEngine.Evaluate(input with
+            {
+                Actions =
+                [
+                    Ready(MageUniversalSkill.即刻咏唱),
+                    Unavailable(BLMSkill.魔泉),
+                ],
+            }).OffGcdCandidate!.ActionId,
+            "Manafont不可用时0.499秒竞争前提必须由即刻获胜");
+        AssertEx.True(fixture.Execution.BeginFrame(fixture.Context, input), "AOE Manafont桥生产帧应建立");
+        var decision = fixture.Execution.GetSnapshot()!.Decision;
+        AssertEx.True(
+            decision.AlwaysBridgeCandidate?.ActionId == BLMSkill.魔泉,
+            "更早即刻候选存在时AOE Manafont仍必须独立建立Always桥");
+        AssertEx.True(
+            decision.OffGcdCandidate?.ActionId == BLMSkill.魔泉,
+            "AOE Manafont Always桥成立时必须覆盖更早OffGCD候选");
+        AssertEx.True(decision.GcdCandidate is null, "AOE Manafont Ack/Gauge前不得交付换相GCD");
+        AssertAction(
+            fixture.Execution.Resolve(BlmResolverChannel.Always, fixture.Context),
+            BLMSkill.魔泉,
+            ActionType.Always,
+            0);
+        AssertEx.True(
+            fixture.Execution.Resolve(BlmResolverChannel.Always, fixture.Context) is null,
+            "AOE Manafont Always桥不得重复交付");
+        AssertEx.True(
+            fixture.Execution.Resolve(BlmResolverChannel.Gcd, fixture.Context) is null,
+            "AOE Manafont Ack/Gauge前不得转冰");
+
+        fixture.Clock.Advance(1);
+        var drifted = fixture.Context with
+        {
+            CapturedAtMs = fixture.Clock.NowMs,
+            AoeTargetId = 201,
+            AoeTargetIsCurrentTarget = false,
+        };
+        var driftedInput = Input(
+            drifted,
+            input.Settings,
+            [Ready(MageUniversalSkill.即刻咏唱), Ready(BLMSkill.魔泉)],
+            previous);
+        AssertEx.True(
+            fixture.Execution.BeginFrame(drifted, driftedInput),
+            "AOE中心漂移后Manafont帧必须重建");
+        AssertEx.True(
+            fixture.Tracker.GetTrackerSnapshot().HasPendingIssuedAction,
+            "AOE中心漂移不得取消Self Manafont Pending");
+        AssertEx.True(
+            fixture.Execution.Resolve(BlmResolverChannel.Always, drifted) is null,
+            "AOE中心漂移后Manafont Pending必须阻止重复Always交付");
+
+        var driftedFrameSequence = fixture.Execution.GetSnapshot()!.FrameSequence;
+        fixture.Clock.Advance(1);
+        var switchedPrimaryTarget = drifted with
+        {
+            CapturedAtMs = fixture.Clock.NowMs,
+            TargetEntityId = 300,
+        };
+        var switchedPrimaryTargetInput = Input(
+            switchedPrimaryTarget,
+            input.Settings,
+            [Ready(MageUniversalSkill.即刻咏唱), Ready(BLMSkill.魔泉)],
+            previous);
+        AssertEx.True(
+            fixture.Execution.BeginFrame(
+                switchedPrimaryTarget,
+                switchedPrimaryTargetInput),
+            "主目标切换后Manafont帧必须重建");
+        AssertEx.True(
+            fixture.Execution.GetSnapshot()!.FrameSequence > driftedFrameSequence,
+            "主目标切换必须产生新DecisionFrame");
+        AssertEx.True(
+            fixture.Tracker.GetTrackerSnapshot().HasPendingIssuedAction,
+            "主目标切换不得取消Self Manafont Pending");
+        AssertEx.True(
+            fixture.Execution.Resolve(
+                BlmResolverChannel.Always,
+                switchedPrimaryTarget) is null,
+            "主目标切换后Manafont Pending必须阻止Ack前重复Always交付");
+
+        foreach (var competitor in new[]
+        {
+            (ActionId: BLMSkill.三连咏唱, GcdRemain: 0.5f, Name: "三连"),
+            (ActionId: MageUniversalSkill.醒梦, GcdRemain: 0.6f, Name: "醒梦"),
+            (ActionId: BLMSkill.详述, GcdRemain: 0.5f, Name: "详述"),
+        })
+        {
+            AssertAoeManafontBridgeOverridesCompetitor(
+                competitor.ActionId,
+                competitor.GcdRemain,
+                competitor.Name);
+        }
+    }
+
+    private static void AssertAoeManafontBridgeOverridesCompetitor(
+        uint competitorActionId,
+        float gcdRemainSeconds,
+        string scenario)
+    {
+        var context = TestContext.Base() with
+        {
+            IsAoeMode = true,
+            EnemyCount = 3,
+            AoeTargetId = 200,
+            AoeTargetCanUseAttack = true,
+            AoeTargetHitCount = 3,
+            AoeTargetIsCurrentTarget = true,
+            Phase = BlmPhase.Fire,
+            AfStacks = 3,
+            IceStacks = 0,
+            UmbralHearts = 0,
+            AstralSoul = 0,
+            Mp = 799,
+            IsCasting = false,
+            AnimationLockSeconds = 0f,
+            GcdRemainSeconds = gcdRemainSeconds,
+        };
+        var fixture = CreateFixture(context);
+        var previous = Success(
+            fixture.Context.Tracker.StateGeneration,
+            BLMSkill.核爆,
+            wasInstant: false);
+        var isAmplifier = competitorActionId == BLMSkill.详述;
+        var settings = BlmResolverSettings.Default with
+        {
+            ManafontEnabled = true,
+            TtkEnabled = !isAmplifier,
+            DotEnabled = false,
+            AmplifierEnabled = isAmplifier,
+            LeyLinesEnabled = false,
+            AutoMitigationEnabled = false,
+        };
+        var input = Input(
+            fixture.Context,
+            settings,
+            [Ready(competitorActionId), Ready(BLMSkill.魔泉)],
+            previous);
+        var competitorOnly = Level100ResolverEngine.Evaluate(input with
+        {
+            Actions =
+            [
+                Ready(competitorActionId),
+                Unavailable(BLMSkill.魔泉),
+            ],
+        });
+        AssertEx.Equal(
+            competitorActionId,
+            competitorOnly.OffGcdCandidate!.ActionId,
+            $"Manafont不可用时{scenario}竞争前提错误");
+
+        AssertEx.True(
+            fixture.Execution.BeginFrame(fixture.Context, input),
+            $"{scenario}竞争Manafont帧应建立");
+        var decision = fixture.Execution.GetSnapshot()!.Decision;
+        AssertEx.Equal(
+            BLMSkill.魔泉,
+            decision.AlwaysBridgeCandidate!.ActionId,
+            $"{scenario}竞争时Manafont Always桥错误");
+        AssertEx.Equal(
+            BLMSkill.魔泉,
+            decision.OffGcdCandidate!.ActionId,
+            $"{scenario}竞争时Manafont必须覆盖普通OffGCD");
+        AssertAction(
+            fixture.Execution.Resolve(BlmResolverChannel.Always, fixture.Context),
+            BLMSkill.魔泉,
+            ActionType.Always,
+            0);
+        AssertEx.True(
+            fixture.Execution.Resolve(BlmResolverChannel.Always, fixture.Context) is null,
+            $"{scenario}竞争时Manafont Always只能交付一次");
+    }
+
     private static Fixture CreateFixture(BlmContext context)
     {
         var clock = new FakeClock(context.CapturedAtMs);
@@ -857,6 +1338,10 @@ internal static class ResolverExecutionTests
                 IsCasting = context.IsCasting,
                 IsSingleTargetMode = !context.IsAoeMode,
                 EnemyCount = context.EnemyCount,
+                AoeTargetId = context.AoeTargetId,
+                AoeTargetCanUseAttack = context.AoeTargetCanUseAttack,
+                AoeTargetHitCount = context.AoeTargetHitCount,
+                AoeTargetIsCurrentTarget = context.AoeTargetIsCurrentTarget,
                 HasTarget = context.HasTarget,
                 CanUseAttackActionOnTarget = context.HasValidTarget,
                 CurrentTargetId = context.TargetEntityId,

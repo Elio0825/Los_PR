@@ -7,7 +7,7 @@ namespace LosPr.BLM.UI;
 /// <summary>
 /// 控制台使用的一帧只读投影。所有事实均来自同一个 <see cref="BlmContext"/>。
 /// </summary>
-public sealed record BlmUiSnapshot
+internal sealed record BlmUiSnapshot
 {
     public long CapturedAtMs { get; init; }
     public DateTimeOffset CapturedAt { get; init; }

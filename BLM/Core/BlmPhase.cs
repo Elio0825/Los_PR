@@ -1,6 +1,6 @@
 namespace LosPr.BLM.Core;
 
-public enum BlmPhase
+internal enum BlmPhase
 {
     Neutral,
     Fire,

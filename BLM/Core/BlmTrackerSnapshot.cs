@@ -2,7 +2,7 @@ using System.Collections.Immutable;
 
 namespace LosPr.BLM.Core;
 
-public sealed record BlmTrackerDecisionSnapshot
+internal sealed record BlmTrackerDecisionSnapshot
 {
     public static BlmTrackerDecisionSnapshot Empty { get; } = new();
 
@@ -11,7 +11,7 @@ public sealed record BlmTrackerDecisionSnapshot
     public BlmActionSuccess? PreviousGcd { get; init; }
 }
 
-public sealed record BlmTrackerSnapshot
+internal sealed record BlmTrackerSnapshot
 {
     public static BlmTrackerSnapshot Empty { get; } = new();
 
@@ -54,7 +54,7 @@ public sealed record BlmTrackerSnapshot
         && ParadoxUsedIceSerial == IcePhaseSerial;
 }
 
-public readonly record struct BlmActionEffectAck(
+internal readonly record struct BlmActionEffectAck(
     long CombatSerial,
     long StateGeneration,
     uint SourceId,

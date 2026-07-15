@@ -1,7 +1,12 @@
 bin/
 obj/
 .idea/
+.vs/
+TestResults/
 *.user
 *.suo
 *.tmp
-
+*.log
+*.tspack
+*.zip
+*.rar

@@ -8,6 +8,11 @@ internal static partial class Level100SingleTargetResolvers
     {
         var context = input.Context;
         var settings = input.Settings;
+        if (context.IsAoeMode)
+        {
+            return BlmResolverCheckResult.Reject(-234);
+        }
+
         if (!settings.DotEnabled || !settings.DoubleDotEnabled)
         {
             return BlmResolverCheckResult.Reject(-100);

@@ -1,6 +1,6 @@
 namespace LosPr.BLM.Resolvers;
 
-public readonly record struct BlmResolverRuntimeObservation(
+internal readonly record struct BlmResolverRuntimeObservation(
     long StateGeneration,
     long CapturedAtMs,
     bool IsAvailable,
@@ -14,7 +14,7 @@ public readonly record struct BlmResolverRuntimeObservation(
     bool HasAvailableInstantGcd,
     bool SwiftcastCurrentlyAvailable);
 
-public sealed record BlmResolverRuntimeState
+internal sealed record BlmResolverRuntimeState
 {
     public static BlmResolverRuntimeState Empty { get; } = new();
 
@@ -25,7 +25,7 @@ public sealed record BlmResolverRuntimeState
     public bool NeedsForcedIceRecovery { get; init; }
 }
 
-public sealed class BlmResolverRuntimeMemory
+internal sealed class BlmResolverRuntimeMemory
 {
     private readonly object _gate = new();
     private BlmResolverRuntimeState _state = BlmResolverRuntimeState.Empty;

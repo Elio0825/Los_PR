@@ -6,7 +6,7 @@ using System.Threading.Tasks;
 
 namespace LosPr.BLM.Diagnostics;
 
-public sealed record BlmDebugTraceOptions
+internal sealed record BlmDebugTraceOptions
 {
     public int QueueCapacity { get; init; } = 4096;
     public int RecentEventCapacity { get; init; } = 300;
@@ -37,7 +37,7 @@ public sealed record BlmDebugTraceOptions
     }
 }
 
-public sealed class BlmDebugTraceService : IBlmDebugSink, IBlmDebugViewSource, IDisposable
+internal sealed class BlmDebugTraceService : IBlmDebugSink, IBlmDebugViewSource, IDisposable
 {
     private const int DecisionDedupeWindowMs = 2000;
     private static readonly TimeSpan DisposeTimeout = TimeSpan.FromSeconds(5);
@@ -45,6 +45,7 @@ public sealed class BlmDebugTraceService : IBlmDebugSink, IBlmDebugViewSource, I
     private static readonly JsonSerializerOptions JsonOptions = CreateJsonOptions();
 
     private readonly object _gate = new();
+    private readonly object _retentionGate = new();
     private readonly string _logDirectory;
     private readonly Func<bool> _fileLoggingEnabled;
     private readonly BlmDebugTraceOptions _options;
@@ -59,7 +60,11 @@ public sealed class BlmDebugTraceService : IBlmDebugSink, IBlmDebugViewSource, I
     private readonly string _filePrefix;
 
     private StreamWriter? _writer;
+    private StreamWriter? _readableWriter;
+    private Task _retentionCleanup = Task.CompletedTask;
     private string _currentFilePath = string.Empty;
+    private string _currentReadableFilePath = string.Empty;
+    private string _pendingRetentionPath = string.Empty;
     private string _lastError = string.Empty;
     private long _currentFileBytes;
     private long _nextEventSequence;
@@ -146,18 +151,21 @@ public sealed class BlmDebugTraceService : IBlmDebugSink, IBlmDebugViewSource, I
     {
         lock (_gate)
         {
+            var fileLoggingEnabled = ReadFileLoggingEnabled();
+            var lastError = Volatile.Read(ref _lastError);
             return new BlmDebugSnapshot
             {
                 CapturedAtUtc = DateTimeOffset.UtcNow,
-                FileLoggingEnabled = ReadFileLoggingEnabled(),
-                WriterHealthy = string.IsNullOrEmpty(_lastError),
+                FileLoggingEnabled = fileLoggingEnabled,
+                WriterHealthy = string.IsNullOrEmpty(lastError),
                 LogDirectory = _logDirectory,
-                CurrentFilePath = _currentFilePath,
+                CurrentFilePath = Volatile.Read(ref _currentFilePath),
+                ReadableFilePath = Volatile.Read(ref _currentReadableFilePath),
                 PendingCount = Volatile.Read(ref _pendingWrites),
                 AcceptedCount = _acceptedCount,
                 WrittenCount = Interlocked.Read(ref _writtenCount),
                 DroppedCount = _droppedCount,
-                LastError = _lastError,
+                LastError = lastError,
                 RecentEvents = BlmDebugSnapshot.Freeze(_recent.ToArray()),
             };
         }
@@ -224,6 +232,24 @@ public sealed class BlmDebugTraceService : IBlmDebugSink, IBlmDebugViewSource, I
         {
             RecordError("关闭 Debug 日志消费者失败", exception);
         }
+
+        Task retentionCleanup;
+        lock (_retentionGate)
+        {
+            retentionCleanup = _retentionCleanup;
+        }
+
+        try
+        {
+            if (!retentionCleanup.Wait(DisposeTimeout))
+            {
+                RecordError("关闭 Debug 日志保留清理超时", new TimeoutException());
+            }
+        }
+        catch (Exception exception)
+        {
+            RecordError("关闭 Debug 日志保留清理失败", exception);
+        }
     }
 
     private BlmDebugEvent Freeze(BlmDebugEventDraft draft)
@@ -234,7 +260,7 @@ public sealed class BlmDebugTraceService : IBlmDebugSink, IBlmDebugViewSource, I
             ? draft.MonotonicMs
             : context.CapturedAtMs;
 
-        return new BlmDebugEvent
+        var debugEvent = new BlmDebugEvent
         {
             Utc = DateTimeOffset.UtcNow,
             MonotonicMs = monotonicMs,
@@ -258,6 +284,10 @@ public sealed class BlmDebugTraceService : IBlmDebugSink, IBlmDebugViewSource, I
             DroppedCount = draft.DroppedCount,
             Resources = BlmDebugResourceSnapshot.FromContext(context),
             Resolver = FreezeResolver(draft.Resolver),
+        };
+        return debugEvent with
+        {
+            Summary = BlmDebugHumanFormatter.BuildSummary(debugEvent),
         };
     }
 
@@ -353,7 +383,7 @@ public sealed class BlmDebugTraceService : IBlmDebugSink, IBlmDebugViewSource, I
         string detail,
         long droppedCount = 0)
     {
-        AppendRecent(new BlmDebugEvent
+        var debugEvent = new BlmDebugEvent
         {
             EventSequence = ++_nextEventSequence,
             Utc = DateTimeOffset.UtcNow,
@@ -361,6 +391,10 @@ public sealed class BlmDebugTraceService : IBlmDebugSink, IBlmDebugViewSource, I
             Kind = kind,
             Detail = BlmDebugText.Clean(detail),
             DroppedCount = droppedCount,
+        };
+        AppendRecent(debugEvent with
+        {
+            Summary = BlmDebugHumanFormatter.BuildSummary(debugEvent),
         });
     }
 
@@ -399,6 +433,11 @@ public sealed class BlmDebugTraceService : IBlmDebugSink, IBlmDebugViewSource, I
                 }
             }
         }
+        catch (Exception exception)
+        {
+            RecordConsumerFailure("Debug 日志消费者意外终止", exception);
+            throw;
+        }
         finally
         {
             CloseWriter();
@@ -410,6 +449,7 @@ public sealed class BlmDebugTraceService : IBlmDebugSink, IBlmDebugViewSource, I
         try
         {
             var line = JsonSerializer.Serialize(debugEvent, JsonOptions);
+            var readableBlock = BlmDebugHumanFormatter.FormatDocument(debugEvent);
             var bytes = Utf8WithoutBom.GetByteCount(line) + 1L;
             if (_writer is not null
                 && _currentFileBytes > 0
@@ -421,13 +461,13 @@ public sealed class BlmDebugTraceService : IBlmDebugSink, IBlmDebugViewSource, I
             EnsureWriter();
             _writer!.Write(line);
             _writer.Write('\n');
+            _readableWriter!.Write(readableBlock);
             _writer.Flush();
+            _readableWriter.Flush();
             _currentFileBytes += bytes;
             Interlocked.Increment(ref _writtenCount);
-            lock (_gate)
-            {
-                _lastError = string.Empty;
-            }
+            Volatile.Write(ref _lastError, string.Empty);
+            SchedulePendingRetentionCleanup();
         }
         catch (Exception exception)
         {
@@ -454,23 +494,79 @@ public sealed class BlmDebugTraceService : IBlmDebugSink, IBlmDebugViewSource, I
                     : $"{_filePrefix}-{_segmentIndex:D2}.jsonl");
             _segmentIndex++;
         }
-        while (File.Exists(path));
+        while (File.Exists(path) || File.Exists(Path.ChangeExtension(path, ".log")));
 
-        var stream = new FileStream(
-            path,
-            FileMode.CreateNew,
-            FileAccess.Write,
-            FileShare.Read,
-            16 * 1024,
-            FileOptions.SequentialScan);
-        _writer = new StreamWriter(stream, Utf8WithoutBom, 16 * 1024, leaveOpen: false);
-        _currentFileBytes = 0;
-        lock (_gate)
+        var readablePath = Path.ChangeExtension(path, ".log");
+        StreamWriter? writer = null;
+        StreamWriter? readableWriter = null;
+        try
         {
-            _currentFilePath = path;
+            writer = CreateWriter(path);
+            readableWriter = CreateWriter(readablePath);
+            WriteReadableHeader(readableWriter);
+        }
+        catch
+        {
+            writer?.Dispose();
+            readableWriter?.Dispose();
+            if (writer is not null)
+                TryDeleteCreatedFile(path);
+            if (readableWriter is not null)
+                TryDeleteCreatedFile(readablePath);
+            throw;
         }
 
-        CleanupRetention(path);
+        _writer = writer;
+        _readableWriter = readableWriter;
+        _currentFileBytes = 0;
+        Volatile.Write(ref _currentFilePath, path);
+        Volatile.Write(ref _currentReadableFilePath, readablePath);
+        _pendingRetentionPath = path;
+    }
+
+    private void SchedulePendingRetentionCleanup()
+    {
+        var currentPath = _pendingRetentionPath;
+        if (currentPath.Length == 0)
+        {
+            return;
+        }
+
+        _pendingRetentionPath = string.Empty;
+        lock (_retentionGate)
+        {
+            _retentionCleanup = _retentionCleanup.ContinueWith(
+                antecedent =>
+                {
+                    ObserveRetentionAntecedent(antecedent);
+                    var activePath = Volatile.Read(ref _currentFilePath);
+                    CleanupRetention(activePath.Length == 0 ? currentPath : activePath);
+                },
+                CancellationToken.None,
+                TaskContinuationOptions.None,
+                TaskScheduler.Default);
+        }
+    }
+
+    private void ObserveRetentionAntecedent(Task antecedent)
+    {
+        if (antecedent.IsCompletedSuccessfully)
+        {
+            return;
+        }
+
+        try
+        {
+            antecedent.GetAwaiter().GetResult();
+        }
+        catch (OperationCanceledException exception)
+        {
+            RecordError("前序 Debug 日志保留清理已取消", exception);
+        }
+        catch (Exception exception)
+        {
+            RecordError("前序 Debug 日志保留清理失败", exception);
+        }
     }
 
     private void CleanupRetention(string currentPath)
@@ -493,6 +589,7 @@ public sealed class BlmDebugTraceService : IBlmDebugSink, IBlmDebugViewSource, I
                 try
                 {
                     File.Delete(otherFiles[index]);
+                    TryDeleteCompanionLog(otherFiles[index]);
                 }
                 catch (IOException)
                 {
@@ -509,11 +606,17 @@ public sealed class BlmDebugTraceService : IBlmDebugSink, IBlmDebugViewSource, I
     private void CloseWriter()
     {
         var writer = _writer;
+        var readableWriter = _readableWriter;
         _writer = null;
+        _readableWriter = null;
+        DisposeWriter(writer, "关闭 Debug JSONL 失败");
+        DisposeWriter(readableWriter, "关闭易读 Debug 日志失败");
+    }
+
+    private void DisposeWriter(StreamWriter? writer, string operation)
+    {
         if (writer is null)
-        {
             return;
-        }
 
         try
         {
@@ -521,7 +624,61 @@ public sealed class BlmDebugTraceService : IBlmDebugSink, IBlmDebugViewSource, I
         }
         catch (Exception exception)
         {
-            RecordError("关闭 Debug 日志失败", exception);
+            RecordError(operation, exception);
+        }
+    }
+
+    private static StreamWriter CreateWriter(string path)
+    {
+        var stream = new FileStream(
+            path,
+            FileMode.CreateNew,
+            FileAccess.Write,
+            FileShare.Read,
+            16 * 1024,
+            FileOptions.SequentialScan);
+        try
+        {
+            return new StreamWriter(stream, Utf8WithoutBom, 16 * 1024, leaveOpen: false);
+        }
+        catch
+        {
+            stream.Dispose();
+            throw;
+        }
+    }
+
+    private void WriteReadableHeader(StreamWriter writer)
+    {
+        writer.WriteLine("Los 黑魔职业调试日志（易读版）");
+        writer.WriteLine("用途：供玩家直接阅读；同名 .jsonl 保存完整原始数据，反馈问题时请两份一起提供。");
+        writer.WriteLine("说明：时间使用本地时间；英文规则 ID、检查码和序列号属于底层诊断必要信息。");
+        writer.WriteLine($"会话：{_sessionId}");
+        writer.WriteLine("================================================================================");
+        writer.WriteLine();
+    }
+
+    private static void TryDeleteCompanionLog(string jsonlPath)
+    {
+        var readablePath = Path.ChangeExtension(jsonlPath, ".log");
+        try
+        {
+            if (File.Exists(readablePath))
+                File.Delete(readablePath);
+        }
+        catch (IOException)
+        {
+        }
+    }
+
+    private static void TryDeleteCreatedFile(string path)
+    {
+        try
+        {
+            File.Delete(path);
+        }
+        catch
+        {
         }
     }
 
@@ -557,16 +714,42 @@ public sealed class BlmDebugTraceService : IBlmDebugSink, IBlmDebugViewSource, I
 
     private void RecordError(string operation, Exception exception)
     {
+        var detail = SetErrorState(operation, exception);
         lock (_gate)
         {
-            RecordErrorCore(operation, exception);
+            AppendLoggerEvent(BlmDebugEventKind.LoggerError, detail);
         }
     }
 
     private void RecordErrorCore(string operation, Exception exception)
     {
-        _lastError = $"{operation}: {exception.GetType().Name}";
-        AppendLoggerEvent(BlmDebugEventKind.LoggerError, _lastError);
+        var detail = SetErrorState(operation, exception);
+        AppendLoggerEvent(BlmDebugEventKind.LoggerError, detail);
+    }
+
+    private void RecordConsumerFailure(string operation, Exception exception)
+    {
+        var detail = SetErrorState(operation, exception);
+        if (!Monitor.TryEnter(_gate))
+        {
+            return;
+        }
+
+        try
+        {
+            AppendLoggerEvent(BlmDebugEventKind.LoggerError, detail);
+        }
+        finally
+        {
+            Monitor.Exit(_gate);
+        }
+    }
+
+    private string SetErrorState(string operation, Exception exception)
+    {
+        var detail = $"{operation}: {exception.GetType().Name}";
+        Volatile.Write(ref _lastError, detail);
+        return detail;
     }
 
     private void CompletePendingWrite()

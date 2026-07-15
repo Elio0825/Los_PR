@@ -17,6 +17,7 @@ internal static class Level90ResolverParityTests
     {
         ManifestAndLevelBoundaries();
         NeutralAndIcePhaseBoundaries();
+        XenoglossyLevelSegmentsMatchSnapshot();
         FireEntryAndLowMpBoundaries();
         FireParadoxCompressionBoundaries();
         Fire4ReserveAndDespairBoundaries();
@@ -38,13 +39,13 @@ internal static class Level90ResolverParityTests
             Level100ResolverEngine.LosAeBlmAcrSha256,
             "90级注册顺序源哈希必须冻结");
         AssertEx.Equal(
-            "F349964AE903890E5E788E6242A0425CD6A41CCC93208820CBB6C8D2DDE3DB6A",
+            "2FC09B90C567836481DE95380C964EA89875BF56C2B9B2F1361588C10697E5D4",
             Level100ResolverEngine.FrozenManifestSha256,
-            "4B manifest 哈希合同错误");
+            "4C-1 manifest 哈希合同错误");
         AssertEx.Equal(
             Level100ResolverEngine.FrozenManifestSha256,
             Level100ResolverEngine.ManifestSha256,
-            "4B manifest 规范化哈希不匹配");
+            "4C-1 manifest 规范化哈希不匹配");
         AssertEx.Equal(
             BlmResolverManifestDisposition.Active,
             Level100ResolverEngine.Manifest[16].Disposition,
@@ -141,14 +142,6 @@ internal static class Level90ResolverParityTests
             16,
             "默认冰悖论");
 
-        var skipIceParadox = input with
-        {
-            Settings = input.Settings with { SkipIceParadox = true },
-        };
-        var skipped = Evaluate(skipIceParadox, fullIceWithParadox);
-        AssertEx.True(skipped.GcdCandidate is null, "跳过冰悖论时主GCD必须让出");
-        AssertAlwaysTranspose(skipped, "跳过冰悖论");
-
         var fullIce = Evaluate(input, IceContext(input, uiStacks: 3, hearts: 3));
         AssertEx.True(fullIce.GcdCandidate is null, "冰资源完整时主GCD必须返回空");
         AssertAlwaysTranspose(fullIce, "冰资源完整");
@@ -167,6 +160,129 @@ internal static class Level90ResolverParityTests
             "GCD.单体90_99",
             16,
             "冰三后等待回蓝");
+
+        var arbitraryLowMp = Evaluate(
+            input,
+            IceContext(input, uiStacks: 3, hearts: 3) with { Mp = 9499 });
+        AssertGcd(
+            arbitraryLowMp,
+            BLMSkill.冰澈,
+            "GCD.单体90_99",
+            16,
+            "任意UI3冰针3低蓝状态继续冰澈");
+        AssertEx.True(arbitraryLowMp.AlwaysCandidate is null, "9499MP不得星灵");
+
+        var afterIceFourAck = WithHistory(
+            input,
+            Success(BLMSkill.冰澈, 11));
+        var delayedGaugeAfterIceFour = Evaluate(
+            afterIceFourAck,
+            IceContext(afterIceFourAck, uiStacks: 3, hearts: 2) with
+            {
+                Mp = 9000,
+            });
+        AssertEx.True(
+            delayedGaugeAfterIceFour.GcdCandidate is null,
+            "冰澈Ack领先Gauge时不得连打第二发冰澈");
+        AssertAlwaysTranspose(delayedGaugeAfterIceFour, "冰澈Ack领先Gauge");
+
+        var paradoxAfterIceFour = Evaluate(
+            afterIceFourAck,
+            IceContext(afterIceFourAck, uiStacks: 3, hearts: 2) with
+            {
+                Mp = 9000,
+                HasParadox = true,
+            });
+        AssertGcd(
+            paradoxAfterIceFour,
+            BLMSkill.悖论,
+            "GCD.单体90_99",
+            16,
+            "冰澈Ack领先Gauge且持有冰悖论时必须先消费悖论");
+        AssertEx.True(
+            paradoxAfterIceFour.AlwaysCandidate is null,
+            "冰悖论存在时不得星灵转火");
+
+        var ttkArbitraryLowMp = Level100ResolverEngine.Evaluate(input with
+        {
+            Context = IceContext(input, uiStacks: 3, hearts: 3) with { Mp = 9499 },
+            Settings = input.Settings with { TtkEnabled = true },
+        });
+        AssertGcd(
+            ttkArbitraryLowMp,
+            BLMSkill.冰澈,
+            "GCD.单体90_99",
+            16,
+            "TTK不得绕过9499MP离冰门");
+        AssertEx.True(ttkArbitraryLowMp.AlwaysCandidate is null, "TTK低蓝不得星灵");
+
+        var threshold = Evaluate(
+            input,
+            IceContext(input, uiStacks: 3, hearts: 3) with { Mp = 9500 });
+        AssertEx.True(threshold.GcdCandidate is null, "9500MP必须允许离冰");
+        AssertAlwaysTranspose(threshold, "9500MP离冰边界");
+    }
+
+    private static void XenoglossyLevelSegmentsMatchSnapshot()
+    {
+        var level97 = BaseInput() with
+        {
+            Context = BaseInput().Context with
+            {
+                Level = 97,
+                PolyglotStacks = 2,
+                MaxPolyglotStacks = 2,
+                PolyglotTimerMs = 7999,
+            },
+        };
+        AssertGcd(
+            Level100ResolverEngine.Evaluate(level97),
+            BLMSkill.异言,
+            "GCD.异言#1",
+            3,
+            "97级两层通晓7999ms");
+        AssertEx.False(
+            Level100ResolverEngine.Evaluate(level97 with
+            {
+                Context = level97.Context with { PolyglotTimerMs = 8000 },
+            }).GcdCandidate?.ResolverId == "GCD.异言#1",
+            "97级两层通晓8000ms不得倾泻");
+
+        var lowMpManafontSoon = SetAction(
+            level97 with
+            {
+                Context = level97.Context with
+                {
+                    Mp = 0,
+                    PolyglotStacks = 1,
+                    PolyglotTimerMs = 20_000,
+                    AstralSoulStacks = 0,
+                },
+                Settings = level97.Settings with { ManafontEnabled = true },
+            },
+            BLMSkill.魔泉,
+            charges: 0f,
+            cooldownRemainMs: 1000d,
+            canCast: false);
+        AssertEx.False(
+            Level100ResolverEngine.Evaluate(lowMpManafontSoon)
+                .GcdCandidate?.ResolverId == "GCD.异言#1",
+            "80–97低蓝不得使用98级魔泉等待异言分支");
+
+        var level98 = lowMpManafontSoon with
+        {
+            Context = lowMpManafontSoon.Context with
+            {
+                Level = 98,
+                MaxPolyglotStacks = 3,
+            },
+        };
+        AssertGcd(
+            Level100ResolverEngine.Evaluate(level98),
+            BLMSkill.异言,
+            "GCD.异言#1",
+            3,
+            "98级保留低蓝等待魔泉异言");
     }
 
     private static void FireEntryAndLowMpBoundaries()

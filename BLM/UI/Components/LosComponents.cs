@@ -6,7 +6,7 @@ using LosPr.BLM.UI.Theme;
 
 namespace LosPr.BLM.UI.Components;
 
-public enum LosStatusTone
+internal enum LosStatusTone
 {
     Neutral,
     Info,
@@ -15,7 +15,7 @@ public enum LosStatusTone
     Danger,
 }
 
-public static class LosComponents
+internal static class LosComponents
 {
     private enum CommandTone
     {
@@ -158,7 +158,17 @@ public static class LosComponents
     {
         var actualWidth = LosMetrics.Scale(width > 0f ? width : LosMetrics.SliderWidth, scale);
         ImGui.SetNextItemWidth(actualWidth);
-        var changed = ImGui.SliderFloat(label, ref value, min, max, format);
+        PushCompactSliderStyle(scale);
+        bool changed;
+        try
+        {
+            changed = ImGui.SliderFloat(label, ref value, min, max, format);
+        }
+        finally
+        {
+            ImGui.PopStyleVar(4);
+        }
+
         TooltipIfHovered(tooltip, scale);
         return changed;
     }
@@ -175,7 +185,17 @@ public static class LosComponents
     {
         var actualWidth = LosMetrics.Scale(width > 0f ? width : LosMetrics.SliderWidth, scale);
         ImGui.SetNextItemWidth(actualWidth);
-        var changed = ImGui.SliderInt(label, ref value, min, max, format);
+        PushCompactSliderStyle(scale);
+        bool changed;
+        try
+        {
+            changed = ImGui.SliderInt(label, ref value, min, max, format);
+        }
+        finally
+        {
+            ImGui.PopStyleVar(4);
+        }
+
         TooltipIfHovered(tooltip, scale);
         return changed;
     }
@@ -209,10 +229,16 @@ public static class LosComponents
         float fixedWidth = 0f)
     {
         scale = LosMetrics.NormalizeScale(scale);
+        var fontScale = 0.86f;
+        var rawTextSize = ImGui.CalcTextSize(text);
+        var desiredWidth = LosMetrics.Scale(30f, scale) + rawTextSize.X;
         var width = fixedWidth > 0f
             ? fixedWidth
-            : LosMetrics.Scale(LosMetrics.StatusPillWidth, scale);
-        var height = LosMetrics.Scale(24f, scale);
+            : Math.Clamp(
+                desiredWidth,
+                LosMetrics.Scale(76f, scale),
+                LosMetrics.Scale(220f, scale));
+        var height = LosMetrics.Scale(22f, scale);
         var size = new Vector2(width, height);
         var pos = ImGui.GetCursorScreenPos();
         var color = StatusColor(tone);
@@ -233,8 +259,10 @@ public static class LosComponents
 
         var textLeft = dotX + LosMetrics.Scale(8f, scale);
         var fitted = FitText(text, (pos.X + width) - textLeft - LosMetrics.Scale(8f, scale));
-        var textSize = ImGui.CalcTextSize(fitted);
+        var textSize = ImGui.CalcTextSize(fitted) * fontScale;
         drawList.AddText(
+            ImGui.GetFont(),
+            ImGui.GetFontSize() * fontScale,
             new Vector2(textLeft, pos.Y + ((height - textSize.Y) * 0.5f)),
             LosPalette.ToUInt(color),
             fitted);
@@ -286,39 +314,62 @@ public static class LosComponents
         var width = requested.X > 0f
             ? requested.X
             : MathF.Max(1f, ImGui.GetContentRegionAvail().X);
-        var height = requested.Y > 0f
+        var barHeight = requested.Y > 0f
             ? requested.Y
-            : LosMetrics.Scale(LosMetrics.ProgressHeight, scale);
-        var actualSize = new Vector2(width, height);
+            : LosMetrics.Scale(8f, scale);
         var pos = ImGui.GetCursorScreenPos();
         var amount = float.IsFinite(fraction) ? Math.Clamp(fraction, 0f, 1f) : 0f;
         var color = StatusColor(tone);
         var drawList = ImGui.GetWindowDrawList();
-        var rounding = MathF.Min(LosMetrics.Scale(4f, scale), height * 0.5f);
+        var labelFontScale = 0.88f;
+        var labelHeight = string.IsNullOrWhiteSpace(overlay)
+            ? 0f
+            : ImGui.GetFontSize() * labelFontScale;
+        var labelGap = labelHeight > 0f ? LosMetrics.Scale(5f, scale) : 0f;
+        var totalHeight = labelHeight + labelGap + barHeight;
+        var actualSize = new Vector2(width, totalHeight);
+        var barPosition = pos + new Vector2(0f, labelHeight + labelGap);
+        var rounding = MathF.Min(LosMetrics.Scale(4f, scale), barHeight * 0.5f);
 
-        drawList.AddRectFilled(pos, pos + actualSize, LosPalette.ToUInt(LosPalette.Track), rounding);
+        if (!string.IsNullOrWhiteSpace(overlay))
+        {
+            var fitted = FitText(overlay, width);
+            drawList.AddText(
+                ImGui.GetFont(),
+                ImGui.GetFontSize() * labelFontScale,
+                pos,
+                LosPalette.ToUInt(LosPalette.TextSecondary),
+                fitted);
+        }
+
+        drawList.AddRectFilled(
+            barPosition,
+            barPosition + new Vector2(width, barHeight),
+            LosPalette.ToUInt(LosPalette.Track),
+            rounding);
         if (amount > 0f)
         {
             var fillWidth = MathF.Max(rounding * 2f, width * amount);
             fillWidth = MathF.Min(fillWidth, width);
             drawList.AddRectFilled(
-                pos,
-                pos + new Vector2(fillWidth, height),
-                LosPalette.ToUInt(color),
+                barPosition,
+                barPosition + new Vector2(fillWidth, barHeight),
+                LosPalette.ToUInt(LosPalette.WithAlpha(color, 0.82f)),
                 rounding);
         }
 
-        if (!string.IsNullOrWhiteSpace(overlay))
-        {
-            var fitted = FitText(overlay, width - LosMetrics.Scale(12f, scale));
-            var textSize = ImGui.CalcTextSize(fitted);
-            drawList.AddText(
-                pos + ((actualSize - textSize) * 0.5f),
-                LosPalette.ToUInt(LosPalette.TextPrimary),
-                fitted);
-        }
-
         ImGui.InvisibleButton($"##progress_{id}", actualSize);
+    }
+
+    internal static void PushCompactSliderStyle(float scale)
+    {
+        scale = LosMetrics.NormalizeScale(scale);
+        ImGui.PushStyleVar(
+            ImGuiStyleVar.FramePadding,
+            LosMetrics.Scale(new Vector2(8f, 3f), scale));
+        ImGui.PushStyleVar(ImGuiStyleVar.FrameRounding, LosMetrics.Scale(8f, scale));
+        ImGui.PushStyleVar(ImGuiStyleVar.GrabRounding, LosMetrics.Scale(8f, scale));
+        ImGui.PushStyleVar(ImGuiStyleVar.GrabMinSize, LosMetrics.Scale(10f, scale));
     }
 
     public static void TooltipIfHovered(string? text, float scale = 1f)

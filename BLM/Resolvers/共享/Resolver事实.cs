@@ -177,4 +177,22 @@ internal static class Level100ResolverFacts
             && !IsBelowDotHpThreshold(input, target)
             && target.SingleTargetDotRemainingMs <= thresholdMs
             && target.AoeDotRemainingMs <= thresholdMs;
+
+    public static bool IsSingleTargetIceReadyToTranspose(
+        BlmResolverInput input)
+    {
+        var context = input.Context;
+        return context.IsSingleTargetMode
+            && context.Level is >= 90 and <= 100
+            && context.InIce
+            && context.UmbralIceStacks == 3
+            && (PreviousGcdIsAcknowledgedIceFour(input)
+                || context.UmbralHearts == 3
+                    && context.MaxMp > 0
+                    && context.Mp >= context.MaxMp * 0.95);
+    }
+
+    public static bool PreviousGcdIsAcknowledgedIceFour(
+        BlmResolverInput input)
+        => PreviousGcdMatches(input, BLMSkill.冰澈);
 }

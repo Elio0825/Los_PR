@@ -1,6 +1,6 @@
 namespace LosPr.BLM.Data;
 
-public sealed class BlackMageSettingsStore : IDisposable
+internal sealed class BlackMageSettingsStore : IDisposable
 {
     private const string Author = "Los";
     private const string SettingsFileName = "LosSettings.json";

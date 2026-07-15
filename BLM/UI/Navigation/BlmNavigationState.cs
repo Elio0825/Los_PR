@@ -2,7 +2,7 @@ using System;
 
 namespace LosPr.BLM.UI.Navigation;
 
-public sealed class BlmNavigationState
+internal sealed class BlmNavigationState
 {
     public BlmNavigationState(int initialIndex)
     {

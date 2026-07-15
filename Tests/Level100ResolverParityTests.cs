@@ -122,9 +122,9 @@ internal static class Level100ResolverParityTests
             Level100ResolverEngine.Manifest[5].Disposition,
             "重复异言必须原位保留为有效注册");
         AssertEx.Equal(
-            BlmResolverManifestDisposition.RejectSingleTarget,
+            BlmResolverManifestDisposition.Active,
             Level100ResolverEngine.Manifest[4].Disposition,
-            "秽浊必须在100单体闭包中明确拒绝");
+            "秽浊必须按原顺序激活并由模式显式拒绝单体80+");
         AssertEx.Equal(
             BlmResolverManifestDisposition.Inactive,
             Level100ResolverEngine.Manifest[21].Disposition,
@@ -147,9 +147,9 @@ internal static class Level100ResolverParityTests
             "OffGCD 注册数量错误");
 
         var settings = BlmResolverSettings.Default;
-        AssertEx.Equal(18, BlmResolverSettings.Mapping.Length, "离线设置映射必须完整18项");
+        AssertEx.Equal(17, BlmResolverSettings.Mapping.Length, "离线设置映射必须完整17项");
         AssertEx.Equal(
-            18,
+            17,
             BlmResolverSettings.Mapping.Select(item => item.PropertyName).Distinct().Count(),
             "设置映射不得出现重复属性");
         AssertEx.True(settings.ManafontEnabled, "Manafont 默认应开启");
@@ -166,7 +166,6 @@ internal static class Level100ResolverParityTests
         AssertEx.True(settings.LeyLinesEnabled, "黑魔纹默认应开启");
         AssertEx.True(settings.AutoMitigationEnabled, "自动减伤默认应开启");
         AssertEx.False(settings.PotionEnabled, "爆发药默认应关闭");
-        AssertEx.False(settings.SkipIceParadox, "跳过冰悖论默认应关闭");
         AssertEx.True(settings.CompressFireParadox, "压缩火悖论默认应开启");
         AssertEx.True(settings.ReducedAnimationLockEnabled, "减少动画锁默认应开启");
         AssertEx.Equal(3, settings.DotHpThresholdPercent, "不上Dot阈值默认应为3%");
@@ -174,6 +173,10 @@ internal static class Level100ResolverParityTests
             typeof(BlmResolverSettings).GetProperties()
                 .Any(property => property.Name.Contains("CompressIce", StringComparison.Ordinal)),
             "PR 特例禁止迁移压缩冰悖论设置");
+        AssertEx.False(
+            typeof(BlmResolverSettings).GetProperties()
+                .Any(property => property.Name == "SkipIceParadox"),
+            "废弃的跳过冰悖论设置不得残留");
 
         var input = BaseInput();
         var serializedBefore = JsonSerializer.Serialize(input);
@@ -874,6 +877,89 @@ internal static class Level100ResolverParityTests
 
     private static void ManualIceRecoveryAndTriplecastSubstitute()
     {
+        var fullIceLowMp = BaseInput() with
+        {
+            Context = BaseInput().Context with
+            {
+                Phase = BlmPhase.Ice,
+                AstralFireStacks = 0,
+                UmbralIceStacks = 3,
+                UmbralHearts = 3,
+                Mp = 9499,
+                HasParadox = false,
+            },
+        };
+        var fullIceLowMpFrame = Level100ResolverEngine.Evaluate(fullIceLowMp);
+        AssertCandidate(
+            fullIceLowMpFrame.GcdCandidate,
+            BLMSkill.冰澈,
+            "GCD.单体100",
+            "100级UI3冰针3的9499MP继续冰澈");
+        AssertEx.True(
+            fullIceLowMpFrame.AlwaysCandidate is null,
+            "100级9499MP不得提前星灵转火");
+        var ttkFullIceLowMpFrame = Level100ResolverEngine.Evaluate(
+            fullIceLowMp with
+            {
+                Settings = fullIceLowMp.Settings with { TtkEnabled = true },
+            });
+        AssertCandidate(
+            ttkFullIceLowMpFrame.GcdCandidate,
+            BLMSkill.冰澈,
+            "GCD.单体100",
+            "100级TTK不得绕过9499MP离冰门");
+        AssertEx.True(
+            ttkFullIceLowMpFrame.AlwaysCandidate is null,
+            "100级TTK低蓝不得星灵");
+
+        var fullIceThresholdFrame = Level100ResolverEngine.Evaluate(
+            fullIceLowMp with
+            {
+                Context = fullIceLowMp.Context with { Mp = 9500 },
+            });
+        AssertEx.True(
+            fullIceThresholdFrame.GcdCandidate is null,
+            "100级9500MP必须允许离冰");
+        AssertCandidate(
+            fullIceThresholdFrame.AlwaysCandidate,
+            BLMSkill.星灵移位,
+            "Ability.星灵移位",
+            "100级9500MP离冰边界");
+
+        var iceFourAckWithDelayedGauge = WithPreviousGcd(
+            fullIceLowMp with
+            {
+                Context = fullIceLowMp.Context with { UmbralHearts = 2 },
+            },
+            Success(BLMSkill.冰澈, 2, NowMs - 100, isInstant: false));
+        var delayedGaugeAfterIceFour =
+            Level100ResolverEngine.Evaluate(iceFourAckWithDelayedGauge);
+        AssertEx.True(
+            delayedGaugeAfterIceFour.GcdCandidate is null,
+            "100级冰澈Ack领先Gauge时不得连打第二发冰澈");
+        AssertCandidate(
+            delayedGaugeAfterIceFour.AlwaysCandidate,
+            BLMSkill.星灵移位,
+            "Ability.星灵移位",
+            "100级冰澈Ack领先Gauge允许转火");
+
+        var paradoxAfterIceFour = Level100ResolverEngine.Evaluate(
+            iceFourAckWithDelayedGauge with
+            {
+                Context = iceFourAckWithDelayedGauge.Context with
+                {
+                    HasParadox = true,
+                },
+            });
+        AssertCandidate(
+            paradoxAfterIceFour.GcdCandidate,
+            BLMSkill.悖论,
+            "GCD.单体100",
+            "跳过策略废弃后冰悖论必须始终消费");
+        AssertEx.True(
+            paradoxAfterIceFour.AlwaysCandidate is null,
+            "冰悖论存在时不得星灵转火");
+
         var manualUiOne = BaseInput() with
         {
             Context = BaseInput().Context with

@@ -3,7 +3,7 @@ using LosPr.BLM.Resolvers.Level100;
 
 namespace LosPr.BLM.Resolvers;
 
-public sealed class BlmResolverInputAdapter
+internal sealed class BlmResolverInputAdapter
 {
     public static ImmutableArray<uint> RequiredActionIds { get; } =
     [
@@ -38,10 +38,14 @@ public sealed class BlmResolverInputAdapter
     ];
 
     private readonly BlmResolverRuntimeMemory _runtimeMemory;
+    private readonly Func<BlackMageSettings>? _settingsProvider;
 
-    public BlmResolverInputAdapter(BlmResolverRuntimeMemory? runtimeMemory = null)
+    public BlmResolverInputAdapter(
+        BlmResolverRuntimeMemory? runtimeMemory = null,
+        Func<BlackMageSettings>? settingsProvider = null)
     {
         _runtimeMemory = runtimeMemory ?? new BlmResolverRuntimeMemory();
+        _settingsProvider = settingsProvider;
     }
 
     public bool TryCapture(
@@ -53,6 +57,20 @@ public sealed class BlmResolverInputAdapter
     {
         ArgumentNullException.ThrowIfNull(context);
         ArgumentNullException.ThrowIfNull(decision);
+        var consoleSettings = ReadConsoleSettings();
+
+        if (context.Level < (consoleSettings?.MinimumEnabledLevel ?? 1))
+        {
+            input = Build(
+                context,
+                decision,
+                _runtimeMemory.GetSnapshot(),
+                [],
+                highPriority,
+                consoleSettings: consoleSettings);
+            reason = "BelowMinimumEnabledLevel";
+            return false;
+        }
 
         if (!GenerationsMatch(context, decision))
         {
@@ -61,7 +79,8 @@ public sealed class BlmResolverInputAdapter
                 decision,
                 _runtimeMemory.GetSnapshot(),
                 [],
-                highPriority);
+                highPriority,
+                consoleSettings: consoleSettings);
             reason = "GenerationMismatch";
             return false;
         }
@@ -73,7 +92,8 @@ public sealed class BlmResolverInputAdapter
                 decision,
                 BlmResolverRuntimeState.Empty,
                 [],
-                highPriority);
+                highPriority,
+                consoleSettings: consoleSettings);
             return false;
         }
 
@@ -95,7 +115,8 @@ public sealed class BlmResolverInputAdapter
             previewRuntime,
             actions,
             highPriority,
-            ResolveProductionActionChannel);
+            ResolveProductionActionChannel,
+            consoleSettings);
         var hasAvailableInstantGcd =
             Level100ResolverEngine.HasAvailableInstantGcd(preliminaryInput);
         var runtime = _runtimeMemory.Advance(new BlmResolverRuntimeObservation(
@@ -118,7 +139,8 @@ public sealed class BlmResolverInputAdapter
             runtime,
             actions,
             highPriority,
-            ResolveProductionActionChannel);
+            ResolveProductionActionChannel,
+            consoleSettings);
         reason = input.FactCoverage.UnsupportedSummary;
         return true;
     }
@@ -129,7 +151,8 @@ public sealed class BlmResolverInputAdapter
         BlmResolverRuntimeState runtime,
         ImmutableArray<BlmResolverActionFact> actions,
         bool highPriority,
-        Func<uint, BlmResolverChannel?>? resolveActionChannel = null)
+        Func<uint, BlmResolverChannel?>? resolveActionChannel = null,
+        BlackMageSettings? consoleSettings = null)
     {
         ArgumentNullException.ThrowIfNull(context);
         ArgumentNullException.ThrowIfNull(decision);
@@ -151,8 +174,10 @@ public sealed class BlmResolverInputAdapter
             MoveTriplecastEnabled = context.MoveTriplecastEnabled,
             AmplifierEnabled = context.AmplifierEnabled,
             LeyLinesEnabled = context.LeyLinesEnabled,
-            SkipIceParadox = context.SkipIceParadox,
-            CompressFireParadox = context.CompressFireParadox,
+            CompressFireParadox = consoleSettings?.CompressFireParadoxEnabled
+                ?? context.CompressFireParadox,
+            DotHpThresholdPercent = consoleSettings?.DotHpThresholdPercent
+                ?? BlmResolverSettings.Default.DotHpThresholdPercent,
         };
         var contextFacts = new BlmResolverContextFacts
         {
@@ -170,6 +195,10 @@ public sealed class BlmResolverInputAdapter
             IsCasting = context.IsCasting,
             IsSingleTargetMode = !context.IsAoeMode,
             EnemyCount = context.EnemyCount,
+            AoeTargetId = context.AoeTargetId,
+            AoeTargetCanUseAttack = context.AoeTargetCanUseAttack,
+            AoeTargetHitCount = context.AoeTargetHitCount,
+            AoeTargetIsCurrentTarget = context.AoeTargetIsCurrentTarget,
             HasTarget = context.HasTarget,
             CanUseAttackActionOnTarget = context.HasValidTarget,
             CurrentTargetId = context.TargetEntityId,
@@ -523,4 +552,16 @@ public sealed class BlmResolverInputAdapter
 
     private static float FiniteNonNegative(float value)
         => float.IsFinite(value) ? Math.Max(0f, value) : 0f;
+
+    private BlackMageSettings? ReadConsoleSettings()
+    {
+        try
+        {
+            return _settingsProvider?.Invoke();
+        }
+        catch
+        {
+            return null;
+        }
+    }
 }

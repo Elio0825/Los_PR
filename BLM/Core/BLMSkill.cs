@@ -1,6 +1,6 @@
 namespace LosPr.BLM.Core;
 
-public static class BLMSkill
+internal static class BLMSkill
 {
     public const uint 火炎 = 141;
     public const uint 冰结 = 142;
@@ -38,7 +38,7 @@ public static class BLMSkill
     public const uint 耀星 = 36989;
 }
 
-public static class MageUniversalSkill
+internal static class MageUniversalSkill
 {
     public const uint 沉稳咏唱 = 7559;
     public const uint 昏乱 = 7560;

@@ -23,6 +23,7 @@ internal static class Level1To89ResolverParityTests
         MovementAndSpecialSequenceRemainFailClosed();
         ManafontAlwaysBridgeUsesLevelSpecificIceReturn();
         SharedAbilityLevelBoundaries();
+        XenoglossyLevelSegmentsMatchSnapshot();
         SmartAoeLevelGateAndFailClosedAoeEntries();
     }
 
@@ -47,7 +48,7 @@ internal static class Level1To89ResolverParityTests
         AssertEx.Equal(
             Level100ResolverEngine.FrozenManifestSha256,
             Level100ResolverEngine.ManifestSha256,
-            "4B manifest规范化哈希不匹配");
+            "4C-1 manifest规范化哈希不匹配");
 
         for (var order = 17; order <= 20; order++)
         {
@@ -401,9 +402,9 @@ internal static class Level1To89ResolverParityTests
         for (var order = 10; order <= 14; order++)
         {
             AssertEx.Equal(
-                BlmResolverManifestDisposition.RejectSingleTarget,
+                BlmResolverManifestDisposition.Active,
                 Level100ResolverEngine.Manifest[order].Disposition,
-                $"4B AOE order {order} 必须保持fail closed");
+                $"4C-1 AOE order {order} 必须激活");
         }
 
         var lowLevelSingleTarget = Level100ResolverEngine.Evaluate(BaseInput(11));
@@ -457,6 +458,64 @@ internal static class Level1To89ResolverParityTests
             input,
             BLMSkill.详述,
             ready: true));
+    }
+
+    private static void XenoglossyLevelSegmentsMatchSnapshot()
+    {
+        var level80 = BaseInput(80) with
+        {
+            Context = BaseInput(80).Context with
+            {
+                PolyglotStacks = 2,
+                PolyglotTimerMs = 7999,
+            },
+        };
+        AssertCandidate(
+            Level100ResolverEngine.Evaluate(level80).GcdCandidate,
+            BLMSkill.异言,
+            "GCD.异言#1",
+            3,
+            "80级两层通晓7999ms");
+        AssertEx.False(
+            Level100ResolverEngine.Evaluate(level80 with
+            {
+                Context = level80.Context with { PolyglotTimerMs = 8000 },
+            }).GcdCandidate?.ResolverId == "GCD.异言#1",
+            "80级两层通晓8000ms不得倾泻");
+
+        var level86 = BaseInput(86) with
+        {
+            Context = BaseInput(86).Context with
+            {
+                PolyglotStacks = 2,
+                PolyglotTimerMs = 20_000,
+            },
+        };
+        level86 = level86 with
+        {
+            Actions = level86.Actions.Select(action =>
+                action.RequestedActionId == BLMSkill.详述
+                    ? action with
+                    {
+                        IsUnlocked = true,
+                        CanCast = false,
+                        Charges = 0f,
+                        CooldownRemainMs = 1000d,
+                    }
+                    : action).ToImmutableArray(),
+        };
+        AssertCandidate(
+            Level100ResolverEngine.Evaluate(level86).GcdCandidate,
+            BLMSkill.异言,
+            "GCD.异言#1",
+            3,
+            "86级两层通晓等待详述");
+        AssertEx.False(
+            Level100ResolverEngine.Evaluate(level86 with
+            {
+                Context = level86.Context with { Level = 85 },
+            }).GcdCandidate?.ResolverId == "GCD.异言#1",
+            "85级不得使用86级详述等待异言分支");
     }
 
     private static bool ShouldUseAoeMode(

@@ -19,7 +19,6 @@ internal static class BlmPanelPrimitives
             ["TTK"] = "目标即将死亡时，允许消耗不适合继续保留的资源。",
             ["移动通晓"] = "移动且缺少更合适的瞬发手段时，允许使用通晓技能。",
             ["移动三连"] = "移动且下一主体读条不安全时，允许主动释放三连咏唱。",
-            ["压缩火悖论"] = "满足资源与时序条件时，允许采用火悖论压缩路线。",
             ["即刻进冰"] = "允许即刻咏唱保障星灵移位后的冰封。",
             ["三连进冰"] = "允许三连咏唱保障星灵移位后的冰封。",
             ["黑魔纹"] = "允许在安全织入窗口自动释放黑魔纹。",
@@ -27,7 +26,6 @@ internal static class BlmPanelPrimitives
             ["魔泉"] = "火段资源耗尽且条件满足时，允许使用魔泉继续火段。",
             ["倾泻资源"] = "允许主动消耗通晓层数，降低资源溢出风险。",
             ["快速耀星"] = "满足火段资源条件时，允许更早释放耀星。",
-            ["不打冰悖论"] = "跳过冰阶段悖论，直接推进冰段资源与回火流程。",
         };
 
     public static string DescriptionForQt(string key)
@@ -62,35 +60,49 @@ internal static class BlmPanelPrimitives
         float scale,
         bool reduceMotion)
     {
-        var changed = false;
-        var flags = ImGuiTableFlags.SizingStretchProp | ImGuiTableFlags.NoSavedSettings;
-        if (!ImGui.BeginTable($"##{id}_row", 2, flags))
-            return false;
+        scale = LosMetrics.NormalizeScale(scale);
+        var position = ImGui.GetCursorScreenPos();
+        var width = MathF.Max(1f, ImGui.GetContentRegionAvail().X);
+        var height = LosMetrics.Scale(58f, scale);
+        var padding = LosMetrics.Scale(16f, scale);
+        var drawList = ImGui.GetWindowDrawList();
+        drawList.AddRectFilled(
+            position,
+            position + new Vector2(width, height),
+            LosPalette.ToUInt(LosPalette.Input),
+            LosMetrics.Scale(12f, scale));
+        drawList.AddRect(
+            position,
+            position + new Vector2(width, height),
+            LosPalette.ToUInt(LosPalette.Border),
+            LosMetrics.Scale(12f, scale),
+            ImDrawFlags.None,
+            1f);
 
-        try
-        {
-            ImGui.TableSetupColumn("label", ImGuiTableColumnFlags.WidthStretch);
-            ImGui.TableSetupColumn("control", ImGuiTableColumnFlags.WidthFixed, LosMetrics.Scale(48f, scale));
-            ImGui.TableNextRow();
-            ImGui.TableNextColumn();
-            ImGui.AlignTextToFramePadding();
-            ImGui.TextUnformatted(title);
-            LosComponents.TooltipIfHovered(description, scale);
+        var textWidth = MathF.Max(
+            20f,
+            width - (padding * 3f) - LosMetrics.Scale(LosMetrics.ToggleWidth, scale));
+        drawList.AddText(
+            position + new Vector2(padding, LosMetrics.Scale(8f, scale)),
+            LosPalette.ToUInt(LosPalette.TextPrimary),
+            LosComponents.FitText(title, textWidth));
+        drawList.AddText(
+            ImGui.GetFont(),
+            ImGui.GetFontSize() * 0.84f,
+            position + new Vector2(padding, LosMetrics.Scale(32f, scale)),
+            LosPalette.ToUInt(LosPalette.TextMuted),
+            LosComponents.FitText(description, textWidth));
 
-            ImGui.TableNextColumn();
-            ImGui.SetCursorPosY(ImGui.GetCursorPosY() + LosMetrics.Scale(2f, scale));
-            var mutable = value;
-            if (LosComponents.Toggle($"##{id}_toggle", ref mutable, scale, reduceMotion, description))
-            {
-                changed = true;
-                onChanged(mutable);
-            }
-        }
-        finally
-        {
-            ImGui.EndTable();
-        }
+        ImGui.SetCursorScreenPos(new Vector2(
+            position.X + width - padding - LosMetrics.Scale(LosMetrics.ToggleWidth, scale),
+            position.Y + ((height - LosMetrics.Scale(LosMetrics.ToggleHeight, scale)) * 0.5f)));
+        var mutable = value;
+        var changed = LosComponents.Toggle($"##{id}_toggle", ref mutable, scale, reduceMotion, description);
+        if (changed)
+            onChanged(mutable);
 
+        ImGui.SetCursorScreenPos(position + new Vector2(0f, height));
+        ImGui.Dummy(new Vector2(width, 0f));
         return changed;
     }
 

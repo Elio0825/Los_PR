@@ -9,7 +9,7 @@ using LosPr.BLM.UI.Theme;
 
 namespace LosPr.BLM.UI.Panels;
 
-public static class BlmSystemPanel
+internal static class BlmDebugPanel
 {
     public static void Draw(
         BlackMageSettingsStore store,
@@ -17,26 +17,9 @@ public static class BlmSystemPanel
         BlmDebugSnapshot debugSnapshot,
         float scale,
         bool reduceMotion,
-        Action resetInterface,
         Action openLogDirectory,
         Action clearDebugView)
     {
-        LosSection.Draw(
-            "system_preferences",
-            "界面与诊断",
-            () => DrawAdaptivePair(
-                "system_preferences_pair",
-                () => DrawAppearance(store, scale, reduceMotion),
-                () => DrawDiagnostics(store, scale, reduceMotion),
-                scale),
-            scale: scale);
-
-        LosSection.Draw(
-            "system_maintenance",
-            "维护",
-            () => DrawMaintenance(store, scale, resetInterface),
-            scale: scale);
-
         if (store.Settings.ShowAdvancedDebug)
         {
             LosSection.Draw(
@@ -47,175 +30,50 @@ public static class BlmSystemPanel
                     () => DrawRecentActions(debugSnapshot, scale),
                     () => DrawResolverRuntime(snapshot, scale),
                     scale),
-                "Decision、PAction 与服务器 ActionEffect 分层显示",
+                "循环决策、技能交付与服务器回执分层显示",
                 scale);
 
             LosSection.Draw(
                 "system_debug_log",
-                "Debug 日志",
+                "调试日志",
                 () => DrawDebugLog(
                     debugSnapshot,
                     openLogDirectory,
                     clearDebugView,
                     scale),
-                "UTF-8 JSONL；文件写入在后台执行",
+                "同时生成易读中文日志与原始 JSONL，后台安全写入",
                 scale);
 
             LosSection.Draw(
                 "system_tracker_diagnostics",
-                "Tracker 诊断",
+                "状态追踪诊断",
                 () => DrawTrackerDiagnostics(snapshot, scale),
                 "只读事实快照；不会推进状态或修改战斗数据",
                 scale);
         }
     }
 
-    private static void DrawAppearance(
+    internal static void DrawCompactControls(
         BlackMageSettingsStore store,
         float scale,
         bool reduceMotion)
     {
-        LosCard.Draw(
-            "system_appearance_card",
-            () =>
-            {
-                var settings = store.Settings;
-                var opacity = settings.WindowOpacity;
-                if (LosComponents.SliderFloat(
-                        "窗口透明度##system_opacity",
-                        ref opacity,
-                        0.70f,
-                        1.00f,
-                        "%.2f",
-                        "控制独立控制台背景透明度。",
-                        scale: scale))
-                {
-                    store.Update(value => value.WindowOpacity = opacity);
-                }
+        _ = reduceMotion;
+        ImGui.TextColored(LosPalette.Cyan, "诊断开关");
+        var settings = store.Settings;
+        var advanced = settings.ShowAdvancedDebug;
+        if (ImGui.Checkbox("详细面板##debug_compact", ref advanced))
+            store.Update(item => item.ShowAdvancedDebug = advanced);
 
-                var uiScale = settings.UiScale;
-                if (LosComponents.SliderFloat(
-                        "界面缩放##system_scale",
-                        ref uiScale,
-                        LosMetrics.MinScale,
-                        LosMetrics.MaxScale,
-                        "%.2f x",
-                        "调整控件和间距；窗口最小尺寸保持不变。",
-                        scale: scale))
-                {
-                    store.Update(value => value.UiScale = uiScale);
-                }
+        var logging = settings.DecisionLogging;
+        if (ImGui.Checkbox("写入调试日志##debug_log_compact", ref logging))
+            store.Update(item => item.DecisionLogging = logging);
 
-                BlmPanelPrimitives.DrawDivider(scale);
-                BlmPanelPrimitives.DrawToggleRow(
-                    "system_reduce_motion",
-                    "减少动效",
-                    "关闭非必要的悬停过渡和脉冲效果。",
-                    settings.ReduceMotion,
-                    value => store.Update(item => item.ReduceMotion = value),
-                    scale,
-                    reduceMotion);
-                BlmPanelPrimitives.DrawDivider(scale);
-                BlmPanelPrimitives.DrawToggleRow(
-                    "system_remember_window",
-                    "记住窗口",
-                    "保存控制台位置和尺寸；拖动与缩放采用 500ms 防抖。",
-                    settings.RememberWindow,
-                    value => store.Update(item => item.RememberWindow = value),
-                    scale,
-                    reduceMotion);
-            },
-            "外观",
-            "安静、紧凑的黑魔控制台主题",
-            height: 300f,
-            scale: scale);
-    }
-
-    private static void DrawDiagnostics(
-        BlackMageSettingsStore store,
-        float scale,
-        bool reduceMotion)
-    {
-        LosCard.Draw(
-            "system_diagnostics_card",
-            () =>
-            {
-                var settings = store.Settings;
-                BlmPanelPrimitives.DrawToggleRow(
-                    "system_advanced_debug",
-                    "高级调试",
-                    "显示 Resolver 决策、通用 Pending、Ack 与 Gauge。",
-                    settings.ShowAdvancedDebug,
-                    value => store.Update(item => item.ShowAdvancedDebug = value),
-                    scale,
-                    reduceMotion);
-                BlmPanelPrimitives.DrawDivider(scale);
-                BlmPanelPrimitives.DrawToggleRow(
-                    "system_decision_log",
-                    "决策日志",
-                    "将 Debug 事件写入 UTF-8 JSONL；关闭后仍保留内存面板。",
-                    settings.DecisionLogging,
-                    value => store.Update(item => item.DecisionLogging = value),
-                    scale,
-                    reduceMotion);
-                BlmPanelPrimitives.DrawDivider(scale);
-
-                var minimumLevel = settings.MinimumEnabledLevel;
-                if (LosComponents.SliderInt(
-                        "最低启用等级##system_min_level",
-                        ref minimumLevel,
-                        1,
-                        100,
-                        "Lv.%d",
-                        "低于该等级时，智能决策引擎保持禁用。",
-                        scale: scale))
-                {
-                    store.Update(item => item.MinimumEnabledLevel = minimumLevel);
-                }
-            },
-            "诊断",
-            "面板与文件日志独立控制",
-            height: 235f,
-            scale: scale);
-    }
-
-    private static void DrawMaintenance(
-        BlackMageSettingsStore store,
-        float scale,
-        Action resetInterface)
-    {
-        LosCard.Draw(
-            "system_maintenance_card",
-            () =>
-            {
-                if (LosComponents.SecondaryButton(
-                        "system_save_now",
-                        "立即保存",
-                        size: new Vector2(132f * scale, 34f * scale),
-                        scale: scale,
-                        tooltip: "立即将当前控制台设置写入 UTF-8 JSON。"))
-                {
-                    store.SaveNow();
-                }
-
-                ImGui.SameLine();
-                if (LosComponents.DangerButton(
-                        "system_reset_ui",
-                        "重置界面",
-                        size: new Vector2(132f * scale, 34f * scale),
-                        scale: scale,
-                        tooltip: "恢复默认外观、页签、窗口位置与尺寸；不会更改任何 QT。"))
-                {
-                    resetInterface();
-                }
-
-                ImGui.Dummy(new Vector2(0f, 10f * scale));
-                LosComponents.KeyValueRow("配置文件", store.FilePath, scale);
-            },
-            "配置",
-            "重置界面不会触碰作战开关",
-            height: 175f,
-            scale: scale);
+        ImGui.TextDisabled("最低启用等级");
+        var minimumLevel = settings.MinimumEnabledLevel;
+        ImGui.SetNextItemWidth(-1f);
+        if (ImGui.SliderInt("##debug_min_level_compact", ref minimumLevel, 1, 100, "Lv.%d"))
+            store.Update(item => item.MinimumEnabledLevel = minimumLevel);
     }
 
     private static void DrawRecentActions(BlmDebugSnapshot debug, float scale)
@@ -230,7 +88,7 @@ public static class BlmSystemPanel
                     scale);
                 ImGui.SameLine();
                 LosComponents.StatusPill(
-                    debug.WriterHealthy ? "Writer 正常" : "Writer 异常",
+                    debug.WriterHealthy ? "写入正常" : "写入异常",
                     debug.WriterHealthy ? LosStatusTone.Success : LosStatusTone.Danger,
                     scale);
 
@@ -248,38 +106,38 @@ public static class BlmSystemPanel
                             : $"{FormatAction(decision)} / {decision.RuleId}",
                     scale);
                 LosComponents.KeyValueRow(
-                    "返回候选",
+                    "已交付技能",
                     dispatch is null
                         ? "暂无"
-                        : $"{FormatAction(dispatch)} / {dispatch.PActionType}",
+                        : $"{FormatAction(dispatch)} / {FormatActionType(dispatch.PActionType)}",
                     scale,
                     LosPalette.Info);
                 LosComponents.KeyValueRow(
                     "服务器确认",
                     ack is null
                         ? "暂无"
-                        : $"{FormatAction(ack)} / Seq {ack.GlobalSequence}",
+                        : $"{FormatAction(ack)} / 服务器序列 {ack.GlobalSequence}",
                     scale,
                     LosPalette.Success);
                 LosComponents.KeyValueRow(
-                    "Ack 前资源",
+                    "确认时资源",
                     ack is null ? "暂无" : FormatResources(ack.Resources),
                     scale);
                 LosComponents.KeyValueRow(
-                    "Gauge 后资源",
+                    "对账后资源",
                     gauge is null ? "暂无" : FormatResources(gauge.Resources),
                     scale);
                 LosComponents.KeyValueRow(
-                    "Ack 时序",
+                    "确认时序",
                     ack is null
                         ? "暂无"
-                        : $"GCD {ack.Resources.GcdRemainSeconds:F2}s"
-                            + $" / Cast {ack.Resources.CastRemainSeconds:F2}s"
-                            + $" / Lock {ack.Resources.AnimationLockSeconds:F3}s",
+                        : $"GCD 剩余 {ack.Resources.GcdRemainSeconds:F2} 秒"
+                            + $" / 读条剩余 {ack.Resources.CastRemainSeconds:F2} 秒"
+                            + $" / 动画锁 {ack.Resources.AnimationLockSeconds:F3} 秒",
                     scale);
             },
             "最近动作与资源",
-            "候选返回不等于实际释放；实际释放只看 Ack",
+            "候选交付不等于实际释放；以服务器确认结果为准",
             height: 415f,
             scale: scale);
     }
@@ -291,12 +149,12 @@ public static class BlmSystemPanel
             () =>
             {
                 LosComponents.StatusPill(
-                    "Resolver 生产模式",
+                    "循环决策工作中",
                     LosStatusTone.Success,
                     scale);
                 ImGui.SameLine();
                 LosComponents.StatusPill(
-                    snapshot.HasPendingIssuedAction ? "等待 Ack" : "无 Pending",
+                    snapshot.HasPendingIssuedAction ? "等待服务器确认" : "无待确认动作",
                     snapshot.HasPendingIssuedAction
                         ? LosStatusTone.Warning
                         : LosStatusTone.Neutral,
@@ -304,27 +162,27 @@ public static class BlmSystemPanel
                 ImGui.Dummy(new Vector2(0f, 6f * scale));
                 LosComponents.KeyValueRow(
                     "决策核心",
-                    "90–100级标准单体 Resolver",
+                    "90–100级标准单体循环",
                     scale);
                 LosComponents.KeyValueRow(
-                    "通用 Pending",
+                    "待确认动作",
                     snapshot.HasPendingIssuedAction
                         ? $"{BlmActionNames.Get(snapshot.PendingIssuedActionId)}"
                             + $" ({snapshot.PendingIssuedActionId})"
                         : "暂无",
                     scale);
                 LosComponents.KeyValueRow(
-                    "Pending 期限",
+                    "确认期限",
                     FormatDeadline(
                         snapshot.PendingIssuedActionDeadlineAtMs,
                         snapshot.CapturedAtMs),
                     scale);
                 LosComponents.KeyValueRow(
-                    "Gauge 对账",
-                    snapshot.PendingGaugeReconcile ? "等待下一 Tick" : "已同步",
+                    "资源对账",
+                    snapshot.PendingGaugeReconcile ? "等待下一帧" : "已同步",
                     scale);
                 LosComponents.KeyValueRow(
-                    "Generation",
+                    "状态代次",
                     snapshot.StateGeneration.ToString(),
                     scale);
 
@@ -334,7 +192,7 @@ public static class BlmSystemPanel
                     BoolLabel(snapshot.HistoryReliable),
                     scale);
                 LosComponents.KeyValueRow(
-                    "Manafont Serial",
+                    "魔泉使用序号",
                     snapshot.ManafontUseSerial.ToString(),
                     scale);
                 LosComponents.KeyValueRow(
@@ -346,8 +204,8 @@ public static class BlmSystemPanel
                     snapshot.LastResetReason,
                     scale);
             },
-            "Resolver 与回执",
-            "标准循环没有 Route/Step 状态图",
+            "循环决策与回执",
+            "直接展示当前决策、待确认动作与服务器回执",
             height: 415f,
             scale: scale);
     }
@@ -363,7 +221,7 @@ public static class BlmSystemPanel
             () =>
             {
                 LosComponents.StatusPill(
-                    debug.FileLoggingEnabled ? "JSONL 开启" : "JSONL 关闭",
+                    debug.FileLoggingEnabled ? "文件记录开启" : "文件记录关闭",
                     debug.FileLoggingEnabled ? LosStatusTone.Success : LosStatusTone.Neutral,
                     scale);
                 ImGui.SameLine();
@@ -383,7 +241,14 @@ public static class BlmSystemPanel
                     $"内存 {debug.RecentEvents.Count} / 待写 {debug.PendingCount}"
                         + $" / 已写 {debug.WrittenCount}",
                     scale);
-                LosComponents.KeyValueRow("日志文件", EmptyAs(debug.CurrentFilePath, "尚未创建"), scale);
+                LosComponents.KeyValueRow(
+                    "易读中文日志",
+                    EmptyAs(debug.ReadableFilePath, "尚未创建"),
+                    scale);
+                LosComponents.KeyValueRow(
+                    "原始 JSONL",
+                    EmptyAs(debug.CurrentFilePath, "尚未创建"),
+                    scale);
                 LosComponents.KeyValueRow("日志目录", EmptyAs(debug.LogDirectory, "不可用"), scale);
                 if (!string.IsNullOrEmpty(debug.LastError))
                 {
@@ -400,7 +265,7 @@ public static class BlmSystemPanel
                         "打开日志目录",
                         size: new Vector2(148f * scale, 34f * scale),
                         scale: scale,
-                        tooltip: "打开 Los 配置目录下的 DebugLogs。"))
+                        tooltip: "打开日志目录；日常查看 .log，排查时保留 .jsonl。"))
                 {
                     openLogDirectory();
                 }
@@ -420,7 +285,7 @@ public static class BlmSystemPanel
                 DrawEventTable(debug, scale);
             },
             "日志状态与最近事件",
-            "事件序列：ResolverFrame -> Dispatch -> ActionEffect Ack -> Gauge",
+            "事件顺序：循环决策 -> 技能交付 -> 服务器回执 -> 资源对账",
             height: 540f,
             scale: scale);
     }
@@ -429,7 +294,7 @@ public static class BlmSystemPanel
     {
         if (debug.RecentEvents.Count == 0)
         {
-            ImGui.TextDisabled("暂无 Debug 事件");
+            ImGui.TextDisabled("暂无调试事件");
             return;
         }
 
@@ -509,14 +374,12 @@ public static class BlmSystemPanel
 
     private static string FormatEventDetail(BlmDebugEvent debugEvent)
     {
-        var detail = string.IsNullOrEmpty(debugEvent.Reason)
-            ? debugEvent.Detail
-            : string.IsNullOrEmpty(debugEvent.Detail)
-                ? debugEvent.Reason
-                : $"{debugEvent.Reason} | {debugEvent.Detail}";
+        var summary = string.IsNullOrEmpty(debugEvent.Summary)
+            ? BlmDebugHumanFormatter.BuildSummary(debugEvent)
+            : debugEvent.Summary;
         var result = string.IsNullOrEmpty(debugEvent.RuleId)
-            ? EmptyAs(detail, "-")
-            : $"{debugEvent.RuleId} | {EmptyAs(detail, "-")}";
+            ? summary
+            : $"{summary} | 规则 {debugEvent.RuleId}";
         return debugEvent.Resources.MaxMp > 0
             && debugEvent.Kind is BlmDebugEventKind.Decision
             or BlmDebugEventKind.ResolverFrame
@@ -525,27 +388,15 @@ public static class BlmSystemPanel
             or BlmDebugEventKind.AckAccepted
             or BlmDebugEventKind.AckRejected
             or BlmDebugEventKind.GaugeReconciled
-            ? $"{result} | MP {debugEvent.Resources.Mp}"
-                + $" AF/UI {debugEvent.Resources.AfStacks}/{debugEvent.Resources.IceStacks}"
-                + $" H {debugEvent.Resources.UmbralHearts} S {debugEvent.Resources.AstralSoul}"
+            ? $"{result} | {BlmDebugHumanFormatter.FormatPhase(debugEvent.Resources.Phase)}"
+                + $" MP {debugEvent.Resources.Mp}"
+                + $" 火/冰层 {debugEvent.Resources.AfStacks}/{debugEvent.Resources.IceStacks}"
+                + $" 冰针 {debugEvent.Resources.UmbralHearts} 星极魂 {debugEvent.Resources.AstralSoul}"
             : result;
     }
 
-    private static string FormatKind(BlmDebugEventKind kind) => kind switch
-    {
-        BlmDebugEventKind.Decision => "Decision",
-        BlmDebugEventKind.ResolverFrame => "Resolver",
-        BlmDebugEventKind.DispatchReturned => "Dispatch",
-        BlmDebugEventKind.ActionEffectObserved => "Ack 观察",
-        BlmDebugEventKind.AckAccepted => "Ack 接受",
-        BlmDebugEventKind.AckRejected => "Ack 拒绝",
-        BlmDebugEventKind.GaugeReconciled => "Gauge",
-        BlmDebugEventKind.Lifecycle => "生命周期",
-        BlmDebugEventKind.AckQueueDropped => "Ack 丢失",
-        BlmDebugEventKind.LoggerDropped => "Logger 丢失",
-        BlmDebugEventKind.LoggerError => "Logger 错误",
-        _ => kind.ToString(),
-    };
+    private static string FormatKind(BlmDebugEventKind kind)
+        => BlmDebugHumanFormatter.FormatEventKind(kind);
 
     private static string FormatDeadline(long deadlineAtMs, long capturedAtMs)
     {
@@ -561,12 +412,15 @@ public static class BlmSystemPanel
     private static string BoolLabel(bool value) => value ? "是" : "否";
 
     private static string FormatResources(BlmDebugResourceSnapshot resources)
-        => $"MP {resources.Mp:N0}/{resources.MaxMp:N0}"
-            + $" | {resources.Phase} AF{resources.AfStacks} UI{resources.IceStacks}"
-            + $" H{resources.UmbralHearts} S{resources.AstralSoul}"
-            + $" P{resources.PolyglotStacks}/{resources.MaxPolyglot}"
-            + $" | 悖论 {BoolLabel(resources.HasParadox)}"
-            + $" 火苗 {BoolLabel(resources.HasFirestarter)}";
+        => BlmDebugHumanFormatter.FormatResources(resources);
+
+    private static string FormatActionType(string actionType) => actionType switch
+    {
+        "Gcd" => "GCD 技能",
+        "OffGcd" => "能力技",
+        "Always" => "高优先能力技",
+        _ => EmptyAs(actionType, "未知类型"),
+    };
 
     private static string EmptyAs(string value, string fallback)
         => string.IsNullOrWhiteSpace(value) ? fallback : value;
@@ -588,44 +442,45 @@ public static class BlmSystemPanel
                     scale);
                 ImGui.SameLine();
                 LosComponents.StatusPill(
-                    snapshot.PendingGaugeReconcile ? "等待 Gauge" : "对账完成",
+                    snapshot.PendingGaugeReconcile ? "等待资源对账" : "对账完成",
                     snapshot.PendingGaugeReconcile ? LosStatusTone.Warning : LosStatusTone.Info,
                     scale);
 
                 ImGui.Dummy(new Vector2(0f, 8f * scale));
                 LosComponents.KeyValueRow(
                     "生命周期",
-                    $"Combat {snapshot.CombatSerial} / Generation {snapshot.StateGeneration}",
+                    $"战斗序号 {snapshot.CombatSerial} / 状态代 {snapshot.StateGeneration}",
                     scale);
                 LosComponents.KeyValueRow(
-                    "Phase Serial",
-                    $"Fire {snapshot.FirePhaseSerial} / Ice {snapshot.IcePhaseSerial}",
+                    "阶段序号",
+                    $"火阶段 {snapshot.FirePhaseSerial} / 冰阶段 {snapshot.IcePhaseSerial}",
                     scale);
                 LosComponents.KeyValueRow(
-                    "Fire IV",
+                    "火四计数",
                     $"本火段 {snapshot.Fire4Count} / 魔泉后 {snapshot.Fire4CountSinceManafont}",
                     scale);
-                LosComponents.KeyValueRow("Manafont Serial", snapshot.ManafontUseSerial.ToString(), scale);
+                LosComponents.KeyValueRow("魔泉使用序号", snapshot.ManafontUseSerial.ToString(), scale);
                 LosComponents.KeyValueRow(
-                    "最近 Ack",
+                    "最近服务器确认",
                     snapshot.LastAckActionId == 0
                         ? "暂无"
-                        : $"Action {snapshot.LastAckActionId} / Seq {snapshot.LastAckSequence}",
+                        : $"{BlmActionNames.Get(snapshot.LastAckActionId)} ({snapshot.LastAckActionId})"
+                            + $" / 服务器序列 {snapshot.LastAckSequence}",
                     scale);
                 LosComponents.KeyValueRow(
-                    "Ack 时间",
+                    "确认时间",
                     FormatTimestamp(snapshot.LastAckAtMs, snapshot.LastAckAgeMs),
                     scale);
                 LosComponents.KeyValueRow(
-                    "Gauge 对账",
+                    "资源对账",
                     snapshot.PendingGaugeReconcile
-                        ? "等待下一 Framework Tick"
+                        ? "等待下一游戏帧"
                         : FormatGaugeReconcile(snapshot),
                     scale,
                     snapshot.PendingGaugeReconcile ? LosPalette.Warning : LosPalette.TextSecondary);
                 LosComponents.KeyValueRow("最近重置", snapshot.LastResetReason, scale);
             },
-            "Tracker / Ack",
+            "状态追踪与服务器确认",
             "同一 BlmContext 中冻结的诊断字段",
             height: 355f,
             scale: scale);
@@ -636,7 +491,9 @@ public static class BlmSystemPanel
         if (snapshot.LastGaugeReconciledActionId == 0)
             return "暂无动作后对账";
 
-        return $"Action {snapshot.LastGaugeReconciledActionId} / {FormatAge(snapshot.LastGaugeReconcileAgeMs)}";
+        return $"{BlmActionNames.Get(snapshot.LastGaugeReconciledActionId)}"
+            + $" ({snapshot.LastGaugeReconciledActionId})"
+            + $" / {FormatAge(snapshot.LastGaugeReconcileAgeMs)}";
     }
 
     private static string FormatTimestamp(long timestampMs, long ageMs)

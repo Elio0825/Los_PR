@@ -1,9 +1,10 @@
 using System.Numerics;
 using Dalamud.Bindings.ImGui;
+using LosPr.BLM.Data;
 
 namespace LosPr.BLM.UI.Theme;
 
-public static class LosTheme
+internal static class LosTheme
 {
     private const int WindowColorCount = 35;
     private const int WindowVarCount = 11;
@@ -17,9 +18,11 @@ public static class LosTheme
     public static void PushWindowStyle(
         float scale = 1f,
         bool reduceMotion = false,
-        float backgroundOpacity = 1f)
+        float backgroundOpacity = 1f,
+        BlmUiThemeStyle themeStyle = BlmUiThemeStyle.MoonlitCat)
     {
         scale = LosMetrics.NormalizeScale(scale);
+        LosPalette.ApplyStyle(themeStyle);
         BackgroundOpacityStack.Push(_backgroundOpacity);
         _backgroundOpacity = Math.Clamp(
             float.IsFinite(backgroundOpacity) ? backgroundOpacity : 1f,
@@ -70,8 +73,8 @@ public static class LosTheme
         ImGui.PushStyleVar(ImGuiStyleVar.ScrollbarRounding, LosMetrics.Scale(LosMetrics.ScrollbarRounding, scale));
         ImGui.PushStyleVar(ImGuiStyleVar.ScrollbarSize, LosMetrics.Scale(LosMetrics.ScrollbarSize, scale));
         ImGui.PushStyleVar(ImGuiStyleVar.ItemSpacing, LosMetrics.Scale(new Vector2(8f, 7f), scale));
-        ImGui.PushStyleVar(ImGuiStyleVar.ItemInnerSpacing, LosMetrics.Scale(new Vector2(6f, 4f), scale));
-        ImGui.PushStyleVar(ImGuiStyleVar.FramePadding, LosMetrics.Scale(new Vector2(9f, 6f), scale));
+        ImGui.PushStyleVar(ImGuiStyleVar.ItemInnerSpacing, LosMetrics.Scale(new Vector2(8f, 4f), scale));
+        ImGui.PushStyleVar(ImGuiStyleVar.FramePadding, LosMetrics.Scale(new Vector2(13f, 6f), scale));
         ImGui.PushStyleVar(ImGuiStyleVar.TabRounding, LosMetrics.Scale(LosMetrics.TabRounding, scale));
 
         _ = reduceMotion;

@@ -1,6 +1,6 @@
 namespace LosPr.BLM.Core;
 
-public readonly record struct BlmActionSuccess(
+internal readonly record struct BlmActionSuccess(
     long StateGeneration,
     long Serial,
     uint RequestedId,
@@ -12,7 +12,7 @@ public readonly record struct BlmActionSuccess(
     bool WasInstant,
     bool IsGcd);
 
-public readonly record struct BlmIssuedActionMetadata(
+internal readonly record struct BlmIssuedActionMetadata(
     long StateGeneration,
     uint RequestedId,
     uint AdjustedAtIssue,
@@ -22,13 +22,13 @@ public readonly record struct BlmIssuedActionMetadata(
     bool WasInstant,
     bool IsGcd);
 
-public readonly record struct BlmResolverAllowedWeavesInput(
+internal readonly record struct BlmResolverAllowedWeavesInput(
     uint NormalizedLastGcdActionId,
     int Level,
     bool WasConfirmedInstant,
     bool ReducedAnimationLockEnabled = false);
 
-public static class BlmDecisionPrimitives
+internal static class BlmDecisionPrimitives
 {
     public const int DefaultRecentlyUsedWindowMs = 1200;
     public const int AeAssistGcdWindowMs = 2500;

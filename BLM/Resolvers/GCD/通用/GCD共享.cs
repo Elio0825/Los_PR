@@ -51,6 +51,65 @@ internal static partial class Level100SingleTargetResolvers
             input.Context.CurrentTargetId,
             BlmResolverTargetKind.CurrentTarget);
 
+    private static BlmResolverCheckResult AoeGcd(
+        BlmResolverInput input,
+        uint requestedActionId,
+        int checkCode)
+    {
+        var context = input.Context;
+        if (!context.IsAoeMode
+            || !context.AoeTargetCanUseAttack
+            || context.AoeTargetId == 0
+            || context.RequiredAoeHitCount <= 0
+            || context.AoeTargetHitCount < context.RequiredAoeHitCount)
+        {
+            return BlmResolverCheckResult.Reject(-9);
+        }
+
+        return new BlmResolverCheckResult(
+            Level100ResolverFacts.EffectiveActionId(input, requestedActionId),
+            checkCode,
+            context.AoeTargetId,
+            context.AoeTargetIsCurrentTarget
+                ? BlmResolverTargetKind.CurrentTarget
+                : BlmResolverTargetKind.SpecifiedTarget);
+    }
+
+    private static BlmResolverCheckResult AoeHostGcd(
+        BlmResolverInput input,
+        uint requestedActionId,
+        int checkCode,
+        bool isAreaAction)
+    {
+        var action = Level100ResolverFacts.Action(input, requestedActionId);
+        if (action is not { IsUnlocked: true })
+        {
+            return BlmResolverCheckResult.Reject(-103);
+        }
+
+        return isAreaAction
+            ? AoeGcd(input, requestedActionId, checkCode)
+            : Gcd(input, requestedActionId, checkCode);
+    }
+
+    private static bool IsAoeGcdUnlocked(
+        BlmResolverInput input,
+        uint requestedActionId)
+        => Level100ResolverFacts.Action(input, requestedActionId)
+            is { IsUnlocked: true };
+
+    private static bool HasEligibleAoeTarget(
+        BlmResolverInput input,
+        bool allowTwoTargets)
+    {
+        var context = input.Context;
+        return context.IsAoeMode
+            && (context.IsThreePlusAoe || allowTwoTargets && context.IsTwoTargetAoe)
+            && context.AoeTargetCanUseAttack
+            && context.AoeTargetId != 0
+            && context.AoeTargetHitCount >= context.RequiredAoeHitCount;
+    }
+
     private static long FireSpellMpCost(
         BlmResolverContextFacts context,
         int baseCost)

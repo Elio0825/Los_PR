@@ -1,6 +1,6 @@
 namespace LosPr.BLM.Core;
 
-public static class BlmBuff
+internal static class BlmBuff
 {
     public const uint 沉稳 = 160;
     public const uint 火苗 = 165;

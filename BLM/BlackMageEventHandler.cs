@@ -1,9 +1,10 @@
 using LosPr.BLM.Resolvers;
 using LosPr.BLM.Resolvers.Production;
+using LosPr.BLM.Openers;
 
 namespace LosPr.BLM;
 
-public sealed class BlackMageEventHandler : IRotationEventHandler, IDisposable
+internal sealed class BlackMageEventHandler : IRotationEventHandler, IDisposable
 {
     private const int MaxPendingAcks = 256;
 
@@ -12,6 +13,7 @@ public sealed class BlackMageEventHandler : IRotationEventHandler, IDisposable
     private readonly IBlmDebugSink _debug;
     private readonly BlmResolverInputAdapter _resolverInputAdapter;
     private readonly BlmResolverExecutionService _execution;
+    private readonly BlmOpenerExecutionService? _opener;
     private readonly ConcurrentQueue<BlmActionEffectAck> _pendingAcks = new();
     private int _pendingAckCount;
     private int _noTargetActive;
@@ -23,12 +25,14 @@ public sealed class BlackMageEventHandler : IRotationEventHandler, IDisposable
         BlmResolverInputAdapter resolverInputAdapter,
         BlmResolverExecutionService execution,
         IBlmClock? clock = null,
-        IBlmDebugSink? debugSink = null)
+        IBlmDebugSink? debugSink = null,
+        BlmOpenerExecutionService? opener = null)
     {
         _tracker = tracker ?? throw new ArgumentNullException(nameof(tracker));
         _resolverInputAdapter = resolverInputAdapter
             ?? throw new ArgumentNullException(nameof(resolverInputAdapter));
         _execution = execution ?? throw new ArgumentNullException(nameof(execution));
+        _opener = opener;
         _clock = clock ?? SystemBlmClock.Instance;
         _debug = debugSink ?? NullBlmDebugSink.Instance;
         CombatEventManager.OnActionEffect += OnActionEffect;
@@ -50,6 +54,10 @@ public sealed class BlackMageEventHandler : IRotationEventHandler, IDisposable
                 Interlocked.Decrement(ref _pendingAckCount);
                 var before = _tracker.GetContextSnapshot();
                 var accepted = _tracker.ApplyActionEffect(ack);
+                if (accepted)
+                {
+                    _opener?.OnAcceptedAction(ack);
+                }
                 var after = _tracker.GetContextSnapshot();
                 PublishDebug(new BlmDebugEventDraft
                 {
@@ -98,7 +106,16 @@ public sealed class BlackMageEventHandler : IRotationEventHandler, IDisposable
                 });
             }
 
+            UI.BlmHotkeyCatalog.ProcessPendingDirectActions();
+
             var highPriorityQueueActive = HasHighPriorityAction();
+            _opener?.Update(afterGauge, highPriorityQueueActive);
+            if (_opener?.OwnsExecution == true)
+            {
+                _execution.InvalidateFrame();
+                return;
+            }
+
             var decisionFacts = _tracker.CaptureDecisionSnapshot();
             var frameContext = afterGauge with
             {
@@ -163,6 +180,7 @@ public sealed class BlackMageEventHandler : IRotationEventHandler, IDisposable
     public void OnNoTarget()
     {
         var context = _tracker.GetContextSnapshot();
+        _opener?.Cancel(context, "目标失效");
         _execution.InvalidateFrame();
         _tracker.CancelIssuedAction();
         if (Interlocked.Exchange(ref _noTargetActive, 1) != 0)
@@ -195,6 +213,8 @@ public sealed class BlackMageEventHandler : IRotationEventHandler, IDisposable
     public void OnBattleEnded()
     {
         var before = _tracker.GetContextSnapshot();
+        _opener?.Cancel(before, "战斗结束");
+        UI.BlmHotkeyCatalog.ClearPending();
         _tracker.EndCombat();
         var after = _tracker.GetContextSnapshot();
         _execution.InvalidateFrame();
@@ -205,6 +225,7 @@ public sealed class BlackMageEventHandler : IRotationEventHandler, IDisposable
     public void OnTerritoryChanged(ushort territoryId)
     {
         var before = _tracker.GetContextSnapshot();
+        _opener?.Cancel(before, "区域切换");
         _tracker.OnTerritoryChanged(territoryId);
         var after = _tracker.GetContextSnapshot();
         _execution.InvalidateFrame();
@@ -233,6 +254,7 @@ public sealed class BlackMageEventHandler : IRotationEventHandler, IDisposable
             Reason = "事件处理器停止",
         });
         _disposed = true;
+        _opener?.Cancel(_tracker.GetContextSnapshot(), "事件处理器停止");
         _execution.InvalidateFrame();
         CombatEventManager.OnActionEffect -= OnActionEffect;
         EventManager.OnPlayerDied -= OnPlayerDied;
@@ -273,6 +295,8 @@ public sealed class BlackMageEventHandler : IRotationEventHandler, IDisposable
             {
                 return;
             }
+
+            UI.BlmHotkeyCatalog.NotifyActionObserved(actionEffect.ActionId);
 
             var receivedAtMs = _clock.NowMs;
             var observedGcd = CaptureObservedGcdFacts(receivedAtMs, context);
@@ -327,6 +351,8 @@ public sealed class BlackMageEventHandler : IRotationEventHandler, IDisposable
         try
         {
             var before = _tracker.GetContextSnapshot();
+            _opener?.Cancel(before, "角色死亡");
+            UI.BlmHotkeyCatalog.ClearPending();
             _tracker.OnPlayerDied();
             _execution.InvalidateFrame();
             TraceLifecycle(

@@ -69,31 +69,20 @@ internal static partial class Level100SingleTargetResolvers
             return BLMSkill.冰封;
         }
 
-        if (context.UmbralHearts < 3)
+        var iceFourAcknowledged =
+            Level100ResolverFacts.PreviousGcdIsAcknowledgedIceFour(input);
+        if (context.UmbralHearts < 3 && !iceFourAcknowledged)
         {
             return BLMSkill.冰澈;
         }
 
         if (context.HasParadox)
         {
-            if (input.Settings.SkipIceParadox)
-            {
-                return 0;
-            }
-
-            if (!context.HasInstantCast && HasIncomingIceInstant(input))
-            {
-                return BLMSkill.悖论;
-            }
-
-            // PR 不迁移“压缩冰悖论”持久化设置，默认保持 los-ae 非压缩行为。
+            // 冰悖论跳过策略已废弃；冰相持有悖论时始终优先消费。
             return BLMSkill.悖论;
         }
 
-        if (Level100ResolverFacts.PreviousGcdMatches(input, BLMSkill.冰封)
-            && context.UmbralHearts >= 3
-            && context.MaxMp > 0
-            && context.Mp < context.MaxMp * 0.95)
+        if (!Level100ResolverFacts.IsSingleTargetIceReadyToTranspose(input))
         {
             return BLMSkill.冰澈;
         }

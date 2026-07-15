@@ -25,6 +25,18 @@ internal static partial class Level100SingleTargetResolvers
             return BlmResolverCheckResult.Reject(-4);
         }
 
+        if (context.IsAoeMode)
+        {
+            var iceReturnAction = context.Level < 35
+                ? BLMSkill.冰结
+                : BLMSkill.冰封;
+            return AoeHostGcd(
+                input,
+                iceReturnAction,
+                500,
+                isAreaAction: false);
+        }
+
         if (!Level100ResolverFacts.IsReadyWithCanCast(input, BLMSkill.冰封))
         {
             return BlmResolverCheckResult.Reject(-5);

@@ -1,11 +1,11 @@
 namespace LosPr.BLM.Core;
 
-public interface IBlmActionIdNormalizer
+internal interface IBlmActionIdNormalizer
 {
     uint Normalize(uint actionId);
 }
 
-public sealed class IdentityBlmActionIdNormalizer : IBlmActionIdNormalizer
+internal sealed class IdentityBlmActionIdNormalizer : IBlmActionIdNormalizer
 {
     public static IdentityBlmActionIdNormalizer Instance { get; } = new();
 
@@ -16,7 +16,7 @@ public sealed class IdentityBlmActionIdNormalizer : IBlmActionIdNormalizer
     public uint Normalize(uint actionId) => actionId;
 }
 
-public sealed class PrBlmActionIdNormalizer : IBlmActionIdNormalizer
+internal sealed class PrBlmActionIdNormalizer : IBlmActionIdNormalizer
 {
     public uint Normalize(uint actionId)
     {

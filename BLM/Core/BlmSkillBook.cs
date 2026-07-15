@@ -1,6 +1,6 @@
 namespace LosPr.BLM.Core;
 
-public static class BlmSkillBook
+internal static class BlmSkillBook
 {
     public static uint FireSpam(BlmContext context)
         => context.Level >= 60 ? BLMSkill.炽炎 : BLMSkill.火炎;
@@ -107,6 +107,25 @@ public static class BlmSkillBook
 
     public static bool IsKnownGcdAction(uint actionId, IBlmActionIdNormalizer normalizer)
         => IsKnownGcdId(actionId) || IsKnownGcdId(normalizer.Normalize(actionId));
+
+    internal static bool IsAoeTargetedGcdId(uint actionId) => actionId is
+        BLMSkill.烈炎 or BLMSkill.高烈炎
+        or BLMSkill.冰冻 or BLMSkill.高冰冻 or BLMSkill.玄冰
+        or BLMSkill.核爆 or BLMSkill.耀星
+        or BLMSkill.震雷 or BLMSkill.霹雷 or BLMSkill.高震雷
+        or BLMSkill.秽浊;
+
+    internal static bool IsKnownSelfAbilityId(uint actionId) => actionId is
+        BLMSkill.星灵移位
+        or MageUniversalSkill.即刻咏唱
+        or BLMSkill.三连咏唱
+        or MageUniversalSkill.醒梦
+        or BLMSkill.详述
+        or BLMSkill.魔泉
+        or BLMSkill.黑魔纹
+        or BLMSkill.魔罩
+        or BLMSkill.魔纹重置
+        or MageUniversalSkill.沉稳咏唱;
 
     public static bool IsIcePhaseCommitGcd(uint actionId, IBlmActionIdNormalizer normalizer)
         => IsIcePhaseCommitId(actionId) || IsIcePhaseCommitId(normalizer.Normalize(actionId));

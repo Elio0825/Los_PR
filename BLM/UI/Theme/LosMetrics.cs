@@ -4,7 +4,7 @@ using LosPr.BLM.Data;
 
 namespace LosPr.BLM.UI.Theme;
 
-public static class LosMetrics
+internal static class LosMetrics
 {
     public static readonly Vector2 DefaultWindowSize = new(
         BlackMageSettings.DefaultWindowWidth,
@@ -15,23 +15,24 @@ public static class LosMetrics
 
     public const float MinScale = BlackMageSettings.MinimumUiScale;
     public const float MaxScale = BlackMageSettings.MaximumUiScale;
-    public const float WindowRounding = 8f;
-    public const float CardRounding = 7f;
-    public const float FrameRounding = 5f;
-    public const float PopupRounding = 7f;
-    public const float TabRounding = 5f;
-    public const float ScrollbarRounding = 4f;
+    public const float WindowRounding = 20f;
+    public const float CardRounding = 16f;
+    public const float FrameRounding = 12f;
+    public const float PopupRounding = 14f;
+    public const float TabRounding = 16f;
+    public const float ScrollbarRounding = 8f;
     public const float ScrollbarSize = 10f;
 
-    public const float HeaderHeight = 72f;
-    public const float TabBarHeight = 42f;
-    public const float ContentPadding = 14f;
-    public const float CardPadding = 14f;
-    public const float CardSpacing = 10f;
-    public const float DefaultCardHeight = 120f;
+    public const float HeaderHeight = 88f;
+    public const float TabBarHeight = 52f;
+    public const float ContentPadding = 36f;
+    public const float CardPadding = 20f;
+    public const float CardSpacing = 14f;
+    public const float CardHeightMultiplier = 1.06f;
+    public const float DefaultCardHeight = 160f;
     public const float SectionHeaderHeight = 46f;
     public const float SectionSpacing = 14f;
-    public const float RowHeight = 28f;
+    public const float RowHeight = 30f;
 
     public const float ButtonHeight = 34f;
     public const float CommandButtonWidth = 132f;
@@ -43,7 +44,10 @@ public static class LosMetrics
     public const float StatusPillWidth = 112f;
     public const float ProgressHeight = 18f;
     public const float TooltipMaxWidth = 320f;
-    public const float CompactBreakpoint = 820f;
+    public const float CompactBreakpoint = 760f;
+    public const float FamiliarRailBreakpoint = 1080f;
+    public const float FamiliarRailWidth = 380f;
+    public const float FamiliarRailRightExtension = 32f;
 
     public static float NormalizeScale(float scale)
         => Math.Clamp(float.IsFinite(scale) ? scale : 1f, MinScale, MaxScale);

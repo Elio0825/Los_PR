@@ -7,7 +7,7 @@ internal static partial class Level100SingleTargetResolvers
         var context = input.Context;
         if (context.IsAoeMode)
         {
-            return BlmResolverCheckResult.Reject(-234);
+            return CheckAoeInstantGcdTrigger(input);
         }
 
         if (context.HasInstantCast)
@@ -32,6 +32,51 @@ internal static partial class Level100SingleTargetResolvers
         }
 
         return Gcd(input, actionId, 1);
+    }
+
+    private static BlmResolverCheckResult CheckAoeInstantGcdTrigger(
+        BlmResolverInput input)
+    {
+        var context = input.Context;
+        if (context.HasInstantCast)
+        {
+            return BlmResolverCheckResult.Reject(-2);
+        }
+
+        var plan = Level100AbilityResolvers.BuildAoeTransposePlan(input);
+        if (plan.Disposition is BlmAoeTransposeDisposition.CastNow
+            or BlmAoeTransposeDisposition.Hold)
+        {
+            return BlmResolverCheckResult.Reject(-6);
+        }
+
+        var isTransposeFill = plan.Disposition == BlmAoeTransposeDisposition.Fill;
+        if (!isTransposeFill && !context.IsMoving && !input.IsIdle)
+        {
+            return BlmResolverCheckResult.Reject(-3);
+        }
+
+        var actionId = isTransposeFill
+            ? plan.FillActionId
+            : SelectAvailableAoeInstantGcd(input, transposeFill: false);
+        if (actionId == 0)
+        {
+            return BlmResolverCheckResult.Reject(-4);
+        }
+
+        if (Level100ResolverFacts.RecentlyUsed(input, actionId))
+        {
+            return BlmResolverCheckResult.Reject(-5);
+        }
+
+        if (!IsAoeGcdUnlocked(input, actionId))
+        {
+            return BlmResolverCheckResult.Reject(-103);
+        }
+
+        return IsAreaAoeAction(actionId)
+            ? AoeGcd(input, actionId, 1)
+            : Gcd(input, actionId, 1);
     }
 
     internal static bool HasAvailableInstantGcd(BlmResolverInput input)
@@ -74,7 +119,7 @@ internal static partial class Level100SingleTargetResolvers
                 return BLMSkill.悖论;
             }
 
-            if (context.InIce && !input.Settings.SkipIceParadox)
+            if (context.InIce)
             {
                 return BLMSkill.悖论;
             }
@@ -156,7 +201,7 @@ internal static partial class Level100SingleTargetResolvers
                 return BLMSkill.悖论;
             }
 
-            if (context.InIce && !input.Settings.SkipIceParadox)
+            if (context.InIce)
             {
                 return BLMSkill.悖论;
             }
@@ -192,7 +237,7 @@ internal static partial class Level100SingleTargetResolvers
                 return BLMSkill.爆炎;
             }
 
-            if (ShouldUseAoeThunder(input, target, double.MaxValue))
+            if (CanUseAoeThunderFallback(input))
             {
                 return Level100ResolverFacts.EffectiveActionId(input, BLMSkill.震雷);
             }
@@ -214,7 +259,26 @@ internal static partial class Level100SingleTargetResolvers
             && target.AoeDotRemainingMs <= thresholdMs
             && IsActionUnlocked(input, BLMSkill.震雷);
 
+    private static bool CanUseAoeThunderFallback(BlmResolverInput input)
+        => input.Context.Level >= 26
+            && input.Settings.DotEnabled
+            && input.Context.HasThunderhead
+            && IsActionUnlocked(input, BLMSkill.震雷);
+
     private static bool IsActionUnlocked(BlmResolverInput input, uint actionId)
         => Level100ResolverFacts.Action(input, actionId)
             is { IsUnlocked: true };
+
+    private static bool IsAreaAoeAction(uint actionId)
+        => actionId is BLMSkill.烈炎
+            or BLMSkill.冰冻
+            or BLMSkill.玄冰
+            or BLMSkill.核爆
+            or BLMSkill.秽浊
+            or BLMSkill.震雷
+            or BLMSkill.霹雷
+            or BLMSkill.高烈炎
+            or BLMSkill.高冰冻
+            or BLMSkill.高震雷
+            or BLMSkill.耀星;
 }

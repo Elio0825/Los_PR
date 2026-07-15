@@ -4,7 +4,7 @@ using LosPr.BLM.Resolvers;
 
 namespace LosPr.BLM.Diagnostics;
 
-public enum BlmDebugEventKind
+internal enum BlmDebugEventKind
 {
     Decision,
     DispatchReturned,
@@ -19,7 +19,7 @@ public enum BlmDebugEventKind
     ResolverFrame,
 }
 
-public sealed record BlmDebugResolverSnapshot
+internal sealed record BlmDebugResolverSnapshot
 {
     public long FrameSequence { get; init; }
     public long FrameCapturedAtMs { get; init; }
@@ -41,7 +41,7 @@ public sealed record BlmDebugResolverSnapshot
     public string FactCoverage { get; init; } = string.Empty;
 }
 
-public sealed record BlmDebugResolverDraft
+internal sealed record BlmDebugResolverDraft
 {
     public long FrameSequence { get; init; }
     public long FrameCapturedAtMs { get; init; }
@@ -63,7 +63,7 @@ public sealed record BlmDebugResolverDraft
     public string FactCoverage { get; init; } = string.Empty;
 }
 
-public sealed record BlmDebugResourceSnapshot
+internal sealed record BlmDebugResourceSnapshot
 {
     public long Mp { get; init; }
     public long MaxMp { get; init; }
@@ -83,6 +83,7 @@ public sealed record BlmDebugResourceSnapshot
     public int TriplecastStacks { get; init; }
     public float TriplecastRemainSeconds { get; init; }
     public bool IsMoving { get; init; }
+    public bool InCombat { get; init; }
     public bool IsCasting { get; init; }
     public bool CanAct { get; init; }
     public float GcdTotalSeconds { get; init; }
@@ -90,6 +91,10 @@ public sealed record BlmDebugResourceSnapshot
     public float CastTotalSeconds { get; init; }
     public float CastRemainSeconds { get; init; }
     public float AnimationLockSeconds { get; init; }
+    public bool IsAoeMode { get; init; }
+    public int EnemyCount { get; init; }
+    public int AoeTargetHitCount { get; init; }
+    public bool AoeTargetIsCurrentTarget { get; init; }
 
     public static BlmDebugResourceSnapshot FromContext(BlmContext context)
     {
@@ -114,6 +119,7 @@ public sealed record BlmDebugResourceSnapshot
             TriplecastStacks = context.TriplecastStacks,
             TriplecastRemainSeconds = context.TriplecastRemainSeconds,
             IsMoving = context.IsMoving,
+            InCombat = context.InCombat,
             IsCasting = context.IsCasting,
             CanAct = context.CanAct,
             GcdTotalSeconds = context.GcdTotalSeconds,
@@ -121,11 +127,15 @@ public sealed record BlmDebugResourceSnapshot
             CastTotalSeconds = context.CastTotalSeconds,
             CastRemainSeconds = context.CastRemainSeconds,
             AnimationLockSeconds = context.AnimationLockSeconds,
+            IsAoeMode = context.IsAoeMode,
+            EnemyCount = context.EnemyCount,
+            AoeTargetHitCount = context.AoeTargetHitCount,
+            AoeTargetIsCurrentTarget = context.AoeTargetIsCurrentTarget,
         };
     }
 }
 
-public sealed record BlmDebugEvent
+internal sealed record BlmDebugEvent
 {
     public const int CurrentSchemaVersion = 2;
 
@@ -135,6 +145,7 @@ public sealed record BlmDebugEvent
     public long MonotonicMs { get; init; }
     public string SessionId { get; init; } = string.Empty;
     public BlmDebugEventKind Kind { get; init; }
+    public string Summary { get; init; } = string.Empty;
     public string EntryPoint { get; init; } = string.Empty;
     public uint ActionId { get; init; }
     public string ActionName { get; init; } = string.Empty;
@@ -155,7 +166,7 @@ public sealed record BlmDebugEvent
     public BlmDebugResolverSnapshot? Resolver { get; init; }
 }
 
-public sealed record BlmDebugEventDraft
+internal sealed record BlmDebugEventDraft
 {
     public BlmDebugEventKind Kind { get; init; }
     public BlmContext Context { get; init; } = BlmContext.Unavailable;
@@ -174,7 +185,7 @@ public sealed record BlmDebugEventDraft
     public BlmDebugResolverDraft? Resolver { get; init; }
 }
 
-public sealed record BlmDebugSnapshot
+internal sealed record BlmDebugSnapshot
 {
     private static readonly IReadOnlyList<BlmDebugEvent> EmptyEvents =
         Array.AsReadOnly(Array.Empty<BlmDebugEvent>());
@@ -186,6 +197,7 @@ public sealed record BlmDebugSnapshot
     public bool WriterHealthy { get; init; } = true;
     public string LogDirectory { get; init; } = string.Empty;
     public string CurrentFilePath { get; init; } = string.Empty;
+    public string ReadableFilePath { get; init; } = string.Empty;
     public int PendingCount { get; init; }
     public long AcceptedCount { get; init; }
     public long WrittenCount { get; init; }
@@ -197,7 +209,7 @@ public sealed record BlmDebugSnapshot
         => new ReadOnlyCollection<BlmDebugEvent>(events);
 }
 
-public static class BlmActionNames
+internal static class BlmActionNames
 {
     public static string Get(uint actionId) => actionId switch
     {
