@@ -1,0 +1,193 @@
+name: Build and Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Release version, e.g. 0.1.2"
+        required: true
+        default: "0.1.2"
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+env:
+  PROJECT_PATH: Los.csproj
+  ROTATION_PATH: BLM\BlackMageRotation.cs
+  ASSEMBLY_NAME: Los
+  NUGET_PACKAGES: ${{ github.workspace }}\.nuget\packages
+  ACR_AUTHOR: "Los"
+  ACR_DESCRIPTION: "一个全等级黑魔ACR 支持日随/高难"
+  ACR_API_VERSION: "15"
+  ACR_SOURCE_REPOSITORY_URL: "https://github.com/Elio0825/Los_PR"
+
+jobs:
+  release:
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Resolve version
+        id: version
+        shell: pwsh
+        run: |
+          $version = "${{ github.event.inputs.version }}"
+          if ([string]::IsNullOrWhiteSpace($version)) {
+            $version = "${{ github.ref_name }}"
+            if ($version.StartsWith("v")) {
+              $version = $version.Substring(1)
+            }
+          }
+
+          $parsedVersion = $null
+          if (-not [System.Version]::TryParse($version, [ref]$parsedVersion)) {
+            throw "Version '$version' is not a valid System.Version value."
+          }
+
+          "version=$version" >> $env:GITHUB_OUTPUT
+          "tag=v$version" >> $env:GITHUB_OUTPUT
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "10.0.x"
+
+      - name: Restore
+        shell: pwsh
+        run: dotnet restore $env:PROJECT_PATH
+
+      - name: Read reference PromeRotation version
+        id: references
+        shell: pwsh
+        run: |
+          $assetsPath = "${{ github.workspace }}\obj\project.assets.json"
+          if (-not (Test-Path -LiteralPath $assetsPath)) {
+            throw "project.assets.json not found at $assetsPath"
+          }
+
+          $assets = Get-Content -LiteralPath $assetsPath -Raw | ConvertFrom-Json
+          $sdkKey = ($assets.libraries | Get-Member -MemberType NoteProperty).Name |
+            Where-Object { $_ -like "PromeRotation.SDK.API15/*" } |
+            Select-Object -First 1
+
+          if (-not $sdkKey) {
+            throw "PromeRotation.SDK.API15 not found in project.assets.json"
+          }
+
+          $packageFolder = Join-Path $env:NUGET_PACKAGES $assets.libraries.$sdkKey.path
+          $promeDll = Join-Path $packageFolder "ref\net10.0-windows7.0\PromeRotation.dll"
+          if (-not (Test-Path -LiteralPath $promeDll)) {
+            throw "PromeRotation.dll not found at $promeDll"
+          }
+
+          $promeVersion = [System.Reflection.AssemblyName]::GetAssemblyName($promeDll).Version.ToString()
+          Write-Host "referencePromeVersion = $promeVersion"
+          "prome_version=$promeVersion" >> $env:GITHUB_OUTPUT
+
+      - name: Sync rotation version
+        shell: pwsh
+        run: |
+          $path = "${{ github.workspace }}\${{ env.ROTATION_PATH }}"
+          $version = "${{ steps.version.outputs.version }}"
+          $text = Get-Content -LiteralPath $path -Raw
+          $pattern = '(?s)(\[RotationMetadata\(\s*25u,\s*"Los 黑魔ACR",\s*"Los",\s*")[^"]+("\s*,)'
+          $regex = [regex]::new($pattern)
+
+          if (-not $regex.IsMatch($text)) {
+            throw "Could not find Los RotationMetadata version in $path"
+          }
+
+          $updated = $regex.Replace($text, '${1}' + $version + '${2}', 1)
+          $utf8NoBom = [System.Text.UTF8Encoding]::new($false)
+          [System.IO.File]::WriteAllText($path, $updated, $utf8NoBom)
+          Write-Host "RotationMetadata version updated to $version"
+
+      - name: Build
+        shell: pwsh
+        run: |
+          $publishDir = "${{ runner.temp }}\publish"
+          dotnet build $env:PROJECT_PATH `
+            --configuration Release `
+            --no-restore `
+            -p:Version="${{ steps.version.outputs.version }}" `
+            -p:TreatWarningsAsErrors=true `
+            -p:OutputPath="$publishDir" `
+            -p:AppendTargetFrameworkToOutputPath=false `
+            -p:AppendRuntimeIdentifierToOutputPath=false
+
+          $dllPath = Join-Path $publishDir "${{ env.ASSEMBLY_NAME }}.dll"
+          $depsPath = Join-Path $publishDir "${{ env.ASSEMBLY_NAME }}.deps.json"
+          if (-not (Test-Path -LiteralPath $dllPath)) {
+            throw "Build output not found: $dllPath"
+          }
+          if (-not (Test-Path -LiteralPath $depsPath)) {
+            throw "Build output not found: $depsPath"
+          }
+
+      - name: Package release
+        id: package
+        shell: pwsh
+        run: |
+          $publishDir = "${{ runner.temp }}\publish"
+          $distDir = "${{ runner.temp }}\dist"
+          New-Item -ItemType Directory -Force -Path $distDir | Out-Null
+
+          $dllPath = Join-Path $publishDir "${{ env.ASSEMBLY_NAME }}.dll"
+          $depsPath = Join-Path $publishDir "${{ env.ASSEMBLY_NAME }}.deps.json"
+          $zipPath = Join-Path $distDir "Los.zip"
+          Compress-Archive -LiteralPath @($dllPath, $depsPath) -DestinationPath $zipPath -Force
+
+          $sha256 = (Get-FileHash -LiteralPath $zipPath -Algorithm SHA256).Hash.ToLowerInvariant()
+          "sha256=$sha256" >> $env:GITHUB_OUTPUT
+          Write-Host "SHA256: $sha256"
+
+      - name: Generate repo.json
+        shell: pwsh
+        run: |
+          $distDir = "${{ runner.temp }}\dist"
+          $repoPath = Join-Path $distDir "repo.json"
+          $manifest = [ordered]@{
+            author = "${{ env.ACR_AUTHOR }}"
+            version = "${{ steps.version.outputs.version }}"
+            description = "${{ env.ACR_DESCRIPTION }}"
+            supportedJobs = @(
+              [ordered]@{
+                job = "BLM"
+                contentScope = "All"
+              }
+            )
+            apiVersion = [int]"${{ env.ACR_API_VERSION }}"
+            referencePromeVersion = "${{ steps.references.outputs.prome_version }}"
+            downloadUrl = "${{ github.server_url }}/${{ github.repository }}/releases/latest/download/Los.zip"
+            sourceRepositoryUrl = "${{ env.ACR_SOURCE_REPOSITORY_URL }}"
+            sha256 = "${{ steps.package.outputs.sha256 }}"
+          }
+
+          $json = $manifest | ConvertTo-Json -Depth 8
+          $utf8NoBom = [System.Text.UTF8Encoding]::new($false)
+          [System.IO.File]::WriteAllText($repoPath, $json, $utf8NoBom)
+          Write-Host "repo.json written to $repoPath"
+
+      - name: Upload workflow artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-files
+          path: |
+            ${{ runner.temp }}\dist\Los.zip
+            ${{ runner.temp }}\dist\repo.json
+
+      - name: Publish GitHub release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.version.outputs.tag }}
+          target_commitish: ${{ github.sha }}
+          name: ${{ steps.version.outputs.tag }}
+          make_latest: true
+          files: |
+            ${{ runner.temp }}\dist\Los.zip
+            ${{ runner.temp }}\dist\repo.json
