@@ -15,6 +15,7 @@ internal static class Program
             ("生产事实适配器", Phase3FactAdapterTests.RunAll),
             ("3B Resolver 生产执行器", ResolverExecutionTests.RunAll),
             ("Tracker 生命周期与 Manafont 对账", TrackerProductionTests.RunAll),
+            ("新日志 ActionEffect 接入", ActionEffectEventTests.RunAll),
             ("Resolver Debug JSONL", ResolverDebugTests.RunAll),
             ("3B 结构边界", Phase3BStructureTests.RunAll),
             ("100级日常/高难5+7起手", Level100OpenerTests.RunAll),

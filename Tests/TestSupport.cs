@@ -1,5 +1,6 @@
 using LosPr.BLM.Core;
 using PromeRotation.Data;
+using PromeRotation.LogSystem;
 
 namespace Los.Tests;
 
@@ -28,6 +29,51 @@ internal sealed class MappingActionIdNormalizer(
         => _mappings.TryGetValue(actionId, out var normalized)
             ? normalized
             : actionId;
+}
+
+internal sealed class TestLogSystemEventSource : ILogSystemEventSource
+{
+    private readonly List<Action<LogSystemEvent>> _subscribers = new();
+
+    public int SubscriptionCount => _subscribers.Count;
+
+    public IDisposable Subscribe(Action<LogSystemEvent> handler)
+    {
+        ArgumentNullException.ThrowIfNull(handler);
+        _subscribers.Add(handler);
+        return new Subscription(_subscribers, handler);
+    }
+
+    public IDisposable Subscribe<TEvent>(Action<TEvent> handler)
+        where TEvent : LogSystemEvent
+    {
+        ArgumentNullException.ThrowIfNull(handler);
+        return Subscribe(item =>
+        {
+            if (item is TEvent typed)
+            {
+                handler(typed);
+            }
+        });
+    }
+
+    private sealed class Subscription(
+        List<Action<LogSystemEvent>> subscribers,
+        Action<LogSystemEvent> handler) : IDisposable
+    {
+        private Action<LogSystemEvent>? _handler = handler;
+
+        public void Dispose()
+        {
+            if (_handler is not { } current)
+            {
+                return;
+            }
+
+            _handler = null;
+            subscribers.Remove(current);
+        }
+    }
 }
 
 internal static class TestContext

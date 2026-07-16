@@ -14,6 +14,8 @@ internal sealed class BlackMageEventHandler : IRotationEventHandler, IDisposable
     private readonly BlmResolverInputAdapter _resolverInputAdapter;
     private readonly BlmResolverExecutionService _execution;
     private readonly BlmOpenerExecutionService? _opener;
+    private readonly IDisposable _actionEffectSubscription;
+    private readonly BlmActionEffectPacketFilter _actionEffectPackets = new();
     private readonly ConcurrentQueue<BlmActionEffectAck> _pendingAcks = new();
     private int _pendingAckCount;
     private int _noTargetActive;
@@ -27,15 +29,36 @@ internal sealed class BlackMageEventHandler : IRotationEventHandler, IDisposable
         IBlmClock? clock = null,
         IBlmDebugSink? debugSink = null,
         BlmOpenerExecutionService? opener = null)
+        : this(
+            tracker,
+            resolverInputAdapter,
+            execution,
+            PromeRotation.Plugin.Instance.LogSystem.Events,
+            clock,
+            debugSink,
+            opener)
+    {
+    }
+
+    internal BlackMageEventHandler(
+        BlmStateTracker tracker,
+        BlmResolverInputAdapter resolverInputAdapter,
+        BlmResolverExecutionService execution,
+        ILogSystemEventSource actionEffectEvents,
+        IBlmClock? clock = null,
+        IBlmDebugSink? debugSink = null,
+        BlmOpenerExecutionService? opener = null)
     {
         _tracker = tracker ?? throw new ArgumentNullException(nameof(tracker));
         _resolverInputAdapter = resolverInputAdapter
             ?? throw new ArgumentNullException(nameof(resolverInputAdapter));
         _execution = execution ?? throw new ArgumentNullException(nameof(execution));
+        ArgumentNullException.ThrowIfNull(actionEffectEvents);
         _opener = opener;
         _clock = clock ?? SystemBlmClock.Instance;
         _debug = debugSink ?? NullBlmDebugSink.Instance;
-        CombatEventManager.OnActionEffect += OnActionEffect;
+        _actionEffectSubscription =
+            actionEffectEvents.Subscribe<LogSystemActionEffectEvent>(OnActionEffect);
         EventManager.OnPlayerDied += OnPlayerDied;
         EventManager.OnPlayerRevived += OnPlayerRevived;
     }
@@ -166,6 +189,7 @@ internal sealed class BlackMageEventHandler : IRotationEventHandler, IDisposable
 
     public void OnBattleStarted()
     {
+        _actionEffectPackets.Clear();
         var before = _tracker.GetContextSnapshot();
         _tracker.BeginCombat();
         var after = _tracker.GetContextSnapshot();
@@ -212,6 +236,7 @@ internal sealed class BlackMageEventHandler : IRotationEventHandler, IDisposable
 
     public void OnBattleEnded()
     {
+        _actionEffectPackets.Clear();
         var before = _tracker.GetContextSnapshot();
         _opener?.Cancel(before, "战斗结束");
         UI.BlmHotkeyCatalog.ClearPending();
@@ -224,6 +249,7 @@ internal sealed class BlackMageEventHandler : IRotationEventHandler, IDisposable
 
     public void OnTerritoryChanged(ushort territoryId)
     {
+        _actionEffectPackets.Clear();
         var before = _tracker.GetContextSnapshot();
         _opener?.Cancel(before, "区域切换");
         _tracker.OnTerritoryChanged(territoryId);
@@ -256,7 +282,7 @@ internal sealed class BlackMageEventHandler : IRotationEventHandler, IDisposable
         _disposed = true;
         _opener?.Cancel(_tracker.GetContextSnapshot(), "事件处理器停止");
         _execution.InvalidateFrame();
-        CombatEventManager.OnActionEffect -= OnActionEffect;
+        _actionEffectSubscription.Dispose();
         EventManager.OnPlayerDied -= OnPlayerDied;
         EventManager.OnPlayerRevived -= OnPlayerRevived;
         var discarded = 0;
@@ -280,7 +306,7 @@ internal sealed class BlackMageEventHandler : IRotationEventHandler, IDisposable
         }
     }
 
-    private void OnActionEffect(ActionEffectEvent actionEffect)
+    private void OnActionEffect(LogSystemActionEffectEvent actionEffect)
     {
         if (_disposed)
         {
@@ -291,7 +317,10 @@ internal sealed class BlackMageEventHandler : IRotationEventHandler, IDisposable
         {
             var context = _tracker.GetContextSnapshot();
             var playerEntityId = context.PlayerEntityId;
-            if (playerEntityId == 0 || actionEffect.SourceId != playerEntityId)
+            var globalSequence = BlmActionEffectEventCompat.GetGlobalSequence(actionEffect);
+            if (playerEntityId == 0
+                || actionEffect.SourceId != playerEntityId
+                || !_actionEffectPackets.TryAccept(actionEffect, globalSequence))
             {
                 return;
             }
@@ -301,9 +330,9 @@ internal sealed class BlackMageEventHandler : IRotationEventHandler, IDisposable
             var receivedAtMs = _clock.NowMs;
             var observedGcd = CaptureObservedGcdFacts(receivedAtMs, context);
             var envelope = _tracker.CreateAckEnvelope(
-                actionEffect.SourceId,
+                playerEntityId,
                 actionEffect.ActionId,
-                actionEffect.GlobalSequence,
+                globalSequence,
                 ReadPreGaugePhase(),
                 receivedAtMs,
                 observedGcd.StartedAtMs,

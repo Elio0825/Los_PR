@@ -512,6 +512,7 @@ internal static class ResolverDebugTests
             tracker,
             new BlmResolverInputAdapter(),
             execution,
+            new TestLogSystemEventSource(),
             clock,
             sink);
         var context = tracker.GetContextSnapshot();
