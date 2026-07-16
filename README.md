@@ -81,7 +81,7 @@ git push origin v0.1.2
 .\scripts\New-AcrRelease.ps1 `
   -PromeRotationDir <PromeRotation 插件目录> `
   -DalamudHooksDir <Dalamud Hooks 目录> `
-  -Version 0.1.1
+  -Version 0.1.2
 ```
 
 构建输出：
