@@ -198,6 +198,16 @@ internal static class Phase3BStructureTests
             && overlay.Contains("DrawTail(", StringComparison.Ordinal)
             && overlay.Contains("DrawControlCatFace(", StringComparison.Ordinal),
             "方案 B 必须保留 QT 猫耳/卷尾和控制条猫脸元素");
+        AssertEx.False(
+            overlay.Contains("##los_auto_pull", StringComparison.Ordinal),
+            "主动攻击开关应放在展开后的控制台，而不是悬浮控制条");
+
+        var console = File.ReadAllText(Path.Combine(root, "BLM", "UI", "BlmConsoleWindow.cs"));
+        AssertEx.True(
+            console.Contains("DrawAutoPullControl(", StringComparison.Ordinal)
+            && console.Contains("PromeSettings.Instance.AutoPull", StringComparison.Ordinal)
+            && console.Contains("BlmPanelPrimitives.DrawToggleRow(", StringComparison.Ordinal),
+            "展开后的控制台标题后必须提供直接绑定 PR AutoPull 的开关");
 
         var qtButtonStart = overlay.IndexOf("private static void DrawQtButton(", StringComparison.Ordinal);
         var nextMethod = overlay.IndexOf("private static void DrawPanelBody(", qtButtonStart, StringComparison.Ordinal);

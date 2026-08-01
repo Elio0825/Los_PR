@@ -86,6 +86,7 @@ internal sealed class BlmConsoleWindow : IDisposable
                 var familiarTexture = _familiarTexture.GetOrQueue();
                 DrawBackdrop(familiarTexture, settings.UiThemeStyle);
                 DrawHeader(snapshot, scale, settings.ReduceMotion);
+                DrawAutoPullControl(scale, settings.ReduceMotion);
                 DrawTabs(scale, settings.ReduceMotion);
                 DrawContent(snapshot, familiarTexture, scale, settings.ReduceMotion);
             }
@@ -141,6 +142,19 @@ internal sealed class BlmConsoleWindow : IDisposable
             null,
             scale,
             reduceMotion);
+    }
+
+    private static void DrawAutoPullControl(float scale, bool reduceMotion)
+    {
+        BlmPanelPrimitives.DrawToggleRow(
+            "auto_pull",
+            "主动攻击",
+            "非战斗状态下允许自动寻找目标并开始攻击。",
+            PromeSettings.Instance.AutoPull,
+            value => PromeSettings.Instance.AutoPull = value,
+            scale,
+            reduceMotion);
+        ImGui.Dummy(new Vector2(0f, LosMetrics.Scale(10f, scale)));
     }
 
     private void DrawTabs(float scale, bool reduceMotion)
