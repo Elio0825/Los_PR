@@ -62,6 +62,7 @@ internal sealed record BlmContext
     public long MaxMp { get; init; }
     public bool IsMoving { get; init; }
     public bool InCombat { get; init; }
+    public bool AutoPullEnabled { get; init; }
     public bool IsAlive { get; init; }
     public bool IsCasting { get; init; }
     public uint CurrentCastingActionId { get; init; }
@@ -184,6 +185,7 @@ internal sealed record BlmContext
         var capturedAtMs = clock.NowMs;
         var capturedAtUtc = DateTimeOffset.UtcNow;
         var acrState = ReadAcrState();
+        var autoPullEnabled = ReadAutoPullEnabled();
 
         try
         {
@@ -195,6 +197,7 @@ internal sealed record BlmContext
                     CapturedAtMs = capturedAtMs,
                     CapturedAtUtc = capturedAtUtc,
                     AcrState = acrState,
+                    AutoPullEnabled = autoPullEnabled,
                     AvailabilityText = "等待角色登录",
                 };
             }
@@ -245,6 +248,7 @@ internal sealed record BlmContext
                 MaxMp = me.MaxMp,
                 IsMoving = MoveManager.IsLocalPlayerMoving,
                 InCombat = PRGameData.IsInCombat(),
+                AutoPullEnabled = autoPullEnabled,
                 IsAlive = !me.IsDead && me.CurrentHp > 0,
                 IsCasting = me.IsCasting,
                 CurrentCastingActionId = me.IsCasting ? me.CastActionId : 0,
@@ -319,6 +323,7 @@ internal sealed record BlmContext
                 CapturedAtMs = capturedAtMs,
                 CapturedAtUtc = capturedAtUtc,
                 AcrState = acrState,
+                AutoPullEnabled = autoPullEnabled,
                 AvailabilityText = "状态读取暂不可用",
                 CaptureError = $"{exception.GetType().Name}: {exception.Message}",
             };
@@ -585,6 +590,18 @@ internal sealed record BlmContext
         catch
         {
             return AcrState.Off;
+        }
+    }
+
+    private static bool ReadAutoPullEnabled()
+    {
+        try
+        {
+            return PromeSettings.Instance.AutoPull;
+        }
+        catch
+        {
+            return false;
         }
     }
 

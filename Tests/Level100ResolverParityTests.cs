@@ -201,7 +201,7 @@ internal static class Level100ResolverParityTests
             input.Context with { IsAvailable = false },
             input.Context with { AcrEnabled = false },
             input.Context with { Level = 0 },
-            input.Context with { InCombat = false },
+            input.Context with { InCombat = false, AutoPullEnabled = false },
             input.Context with { IsAlive = false },
             input.Context with { CanAct = false },
             input.Context with { HasTarget = false },
@@ -218,6 +218,25 @@ internal static class Level100ResolverParityTests
                 frame.BlockReason.Contains("LifecycleOrTargetGate", StringComparison.Ordinal),
                 "生命周期/目标阻断必须给出稳定原因");
         }
+
+        var autoPull = Level100ResolverEngine.Evaluate(input with
+        {
+            Context = input.Context with
+            {
+                InCombat = false,
+                AutoPullEnabled = true,
+                Phase = BlmPhase.Neutral,
+                AstralFireStacks = 0,
+                UmbralIceStacks = 0,
+                UmbralHearts = 0,
+            },
+        });
+        AssertCandidate(
+            autoPull.GcdCandidate,
+            BLMSkill.冰封,
+            "GCD.单体100",
+            "主动攻击脱战首发");
+        AssertEx.False(autoPull.DeliveryBlocked, "主动攻击开启且目标有效时不应被生命周期Gate阻断");
 
         var aoe = Level100ResolverEngine.Evaluate(input with
         {

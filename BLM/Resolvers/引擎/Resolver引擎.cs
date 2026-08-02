@@ -150,7 +150,7 @@ internal static class Level100ResolverEngine
         return context.IsAvailable
             && context.AcrEnabled
             && context.Level is >= 1 and <= 100
-            && context.InCombat
+            && (context.InCombat || context.AutoPullEnabled)
             && context.IsAlive
             && context.CanAct
             && context.HasTarget
@@ -307,7 +307,7 @@ internal static class Level100ResolverEngine
         if (!context.IsAvailable
             || !context.AcrEnabled
             || context.Level is < 1 or > 100
-            || !context.InCombat
+            || (!context.InCombat && !context.AutoPullEnabled)
             || !context.IsAlive
             || !context.CanAct
             || !context.HasTarget

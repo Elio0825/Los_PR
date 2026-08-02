@@ -116,6 +116,7 @@ internal static class Phase3FactAdapterTests
             AmplifierEnabled = false,
             LeyLinesEnabled = false,
             CompressFireParadox = false,
+            AutoPullEnabled = true,
         };
         var decision = Decision(
             generation,
@@ -143,6 +144,7 @@ internal static class Phase3FactAdapterTests
         AssertEx.True(input.Context.AoeTargetCanUseAttack, "AOE中心攻击资格未映射");
         AssertEx.Equal(3, input.Context.AoeTargetHitCount, "AOE中心命中数未映射");
         AssertEx.False(input.Context.AoeTargetIsCurrentTarget, "AOE指定中心事实未映射");
+        AssertEx.True(input.Context.AutoPullEnabled, "主动攻击状态未投影");
         AssertEx.True(input.Context.HasLeyLinesStatus737, "737 应独立投影");
         AssertEx.False(input.Context.HasLeyLinesHaste738, "738 不得由合并 HasLeyLines 推断");
         AssertEx.Equal(3, input.Context.MaxPolyglotStacks, "通晓等级上限事实未投影");

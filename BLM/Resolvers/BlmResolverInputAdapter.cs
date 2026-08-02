@@ -189,6 +189,7 @@ internal sealed class BlmResolverInputAdapter
             Mp = context.Mp,
             MaxMp = context.MaxMp,
             InCombat = context.InCombat,
+            AutoPullEnabled = context.AutoPullEnabled,
             IsAlive = context.IsAlive,
             CanAct = context.CanAct,
             IsMoving = context.IsMoving,

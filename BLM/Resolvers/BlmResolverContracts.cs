@@ -89,6 +89,7 @@ internal sealed record BlmResolverContextFacts
     public long Mp { get; init; }
     public long MaxMp { get; init; }
     public bool InCombat { get; init; }
+    public bool AutoPullEnabled { get; init; }
     public bool IsAlive { get; init; }
     public bool CanAct { get; init; }
     public bool IsMoving { get; init; }
