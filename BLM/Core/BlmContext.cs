@@ -112,6 +112,7 @@ internal sealed record BlmContext
     public bool HasLeyLinesStatus737 { get; init; }
     public bool HasLeyLinesHaste { get; init; }
     public BlmActionAvailability Transpose { get; init; } = new();
+    public BlmActionAvailability UmbralSoul { get; init; } = new();
     public BlmActionAvailability Swiftcast { get; init; } = new();
     public BlmActionAvailability Triplecast { get; init; } = new();
     public BlmActionAvailability LeyLines { get; init; } = new();
@@ -134,6 +135,7 @@ internal sealed record BlmContext
     public bool ManafontEnabled { get; init; }
     public bool DumpPolyglotEnabled { get; init; }
     public bool FastFlareStarEnabled { get; init; }
+    public bool BossFlightEnabled { get; init; }
     public bool InFire => Phase == BlmPhase.Fire;
     public bool InIce => Phase == BlmPhase.Ice;
     public bool IsMpFull => MaxMp > 0 && Mp == MaxMp;
@@ -293,6 +295,7 @@ internal sealed record BlmContext
                 HasLeyLinesStatus737 = hasLeyLinesStatus737,
                 HasLeyLinesHaste = hasLeyLinesHaste,
                 Transpose = CaptureAction(BLMSkill.星灵移位, level),
+                UmbralSoul = CaptureAction(BLMSkill.灵极魂, level),
                 Swiftcast = CaptureAction(MageUniversalSkill.即刻咏唱, level),
                 Triplecast = CaptureAction(BLMSkill.三连咏唱, level),
                 LeyLines = CaptureAction(BLMSkill.黑魔纹, level),
@@ -314,6 +317,7 @@ internal sealed record BlmContext
                 ManafontEnabled = ReadQt("魔泉"),
                 DumpPolyglotEnabled = ReadQt("倾泻资源"),
                 FastFlareStarEnabled = ReadQt("快速耀星"),
+                BossFlightEnabled = ReadQt("Boss上天"),
             };
         }
         catch (Exception exception)

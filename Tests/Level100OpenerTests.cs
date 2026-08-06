@@ -828,6 +828,9 @@ internal static class Level100OpenerTests
         AssertEx.Equal(interruptedIndex, retryArmed.StepIndex, "硬读拉断不得推进起手步骤");
         AssertEx.True(retryArmed.OwnsExecution, "清除旧ActiveCommand后必须继续持有冻结起手");
         AssertEx.False(retryArmed.HasPendingAction, "拉断后的旧Pending必须清空后再重试");
+        AssertEx.True(
+            service.Resolve(BlmResolverChannel.Gcd, tracker.GetContextSnapshot()) is null,
+            "拉断后持续移动期间不得再次投递当前起手 GCD");
 
         var lateAck = tracker.CreateAckEnvelope(
             context.PlayerEntityId,

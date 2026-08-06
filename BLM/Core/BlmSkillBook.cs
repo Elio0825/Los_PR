@@ -127,6 +127,10 @@ internal static class BlmSkillBook
         or BLMSkill.魔纹重置
         or MageUniversalSkill.沉稳咏唱;
 
+    internal static bool IsKnownSelfTargetActionId(uint actionId)
+        => IsKnownSelfAbilityId(actionId)
+            || actionId == BLMSkill.灵极魂;
+
     public static bool IsIcePhaseCommitGcd(uint actionId, IBlmActionIdNormalizer normalizer)
         => IsIcePhaseCommitId(actionId) || IsIcePhaseCommitId(normalizer.Normalize(actionId));
 

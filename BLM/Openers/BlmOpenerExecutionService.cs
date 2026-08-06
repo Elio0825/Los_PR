@@ -58,6 +58,7 @@ internal sealed class BlmOpenerExecutionService
     private bool _pendingIsGcd;
     private bool _pendingHardcastObserved;
     private float _pendingHardcastLastRemainSeconds;
+    private bool _hardcastRetryWaitingForMovementStop;
     private BlmActionEffectAck? _acceptedAck;
     private string? _cancelRequested;
     private string _lastReason = "尚未启动";
@@ -563,6 +564,7 @@ internal sealed class BlmOpenerExecutionService
         _fire4AfterManafont = 0;
         ResetPotionAttemptsNoLock();
         ClearPendingNoLock();
+        _hardcastRetryWaitingForMovementStop = false;
         _cancelRequested = null;
         _lastReason = reason;
     }
@@ -873,6 +875,16 @@ internal sealed class BlmOpenerExecutionService
         BlmContext context,
         bool isPreCombatBridge)
     {
+        if (_hardcastRetryWaitingForMovementStop)
+        {
+            if (context.IsMoving)
+            {
+                return false;
+            }
+
+            _hardcastRetryWaitingForMovementStop = false;
+        }
+
         if (step.Kind == BlmOpenerStepKind.Item && _clock.NowMs < _potionRetryAtMs)
         {
             return false;
@@ -1069,6 +1081,7 @@ internal sealed class BlmOpenerExecutionService
         ClearPendingNoLock();
         _status = BlmOpenerStatus.Executing;
         _stepReadyAtMs = _clock.NowMs;
+        _hardcastRetryWaitingForMovementStop = context.IsMoving;
         _cancelRequested = null;
         _lastReason = reason;
         PublishNoLock(
@@ -1076,7 +1089,9 @@ internal sealed class BlmOpenerExecutionService
             BlmDebugEventKind.Lifecycle,
             "Opener.HardcastRetryArmed",
             0,
-            $"{reason}；已重置PR旧指令，保留当前步骤等待重新投递");
+            _hardcastRetryWaitingForMovementStop
+                ? $"{reason}；当前正在移动，已重置PR旧指令，停止移动后才重新投递当前步骤"
+                : $"{reason}；已重置PR旧指令，保留当前步骤等待重新投递");
     }
 
     private void SkipOptionalPotionNoLock(BlmContext context, string reason)

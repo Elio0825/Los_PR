@@ -204,6 +204,19 @@ internal sealed class BlmStateTracker
         }
     }
 
+    public void CancelTargetDependentIssuedAction()
+    {
+        lock (_gate)
+        {
+            if (_pendingIssuedAction is { } pending
+                && !BlmSkillBook.IsKnownSelfTargetActionId(pending.RequestedId)
+                && !BlmSkillBook.IsKnownSelfTargetActionId(pending.AdjustedAtIssue))
+            {
+                ClearPendingIssuedActionNoLock();
+            }
+        }
+    }
+
     public BlmActionEffectAck CreateAckEnvelope(
         uint sourceId,
         uint actionId,

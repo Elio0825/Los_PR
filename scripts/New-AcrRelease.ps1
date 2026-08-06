@@ -6,7 +6,7 @@ param(
     [Parameter(Mandatory = $true)]
     [string]$DalamudHooksDir,
 
-    [string]$Version = "0.1.4",
+    [string]$Version = "0.1.5",
 
     [string]$OutputDirectory = ""
 )

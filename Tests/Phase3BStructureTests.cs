@@ -249,11 +249,13 @@ internal static class Phase3BStructureTests
             "Action、Item 与动态 LB 必须分别读取游戏原生图标");
         AssertEx.True(
             catalog.Contains("HotkeyQueueManager.TryEnqueue(action)", StringComparison.Ordinal)
-            && catalog.Contains("new PAction(actionId, ActionType.Always", StringComparison.Ordinal)
-            && catalog.Contains("ActionQueueManager.Enqueue(action, isHighPriority: true)", StringComparison.Ordinal)
+            && catalog.Contains("new PAction(actionId, definition.Type", StringComparison.Ordinal)
+            && catalog.Contains("ProcessPendingManualAbilities", StringComparison.Ordinal)
+            && catalog.Contains("UseActionReturn={dispatched}", StringComparison.Ordinal)
+            && catalog.Contains("ManualAbilityAnimationLockThreshold", StringComparison.Ordinal)
             && catalog.Contains("BuildPotionDispatchParameters", StringComparison.Ordinal)
             && catalog.Contains("new(itemId, 0xFFFFu)", StringComparison.Ordinal),
-            "GCD/LB 保留 Hotkey 预输入，手动能力技必须强制走 Always，爆发药必须沿用 PR 物品编码");
+            "GCD/LB 保留 Hotkey 预输入，手动能力技必须等待安全窗口并检查 UseAction 返回值，爆发药必须沿用 PR 物品编码");
         AssertEx.True(
             catalog.Contains("AllowDuringOpener", StringComparison.Ordinal)
             && opener.Contains("BlmHotkeyCatalog.HasPendingManualAbility", StringComparison.Ordinal)

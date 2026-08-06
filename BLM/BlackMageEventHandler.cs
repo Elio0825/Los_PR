@@ -1,6 +1,7 @@
 using LosPr.BLM.Resolvers;
 using LosPr.BLM.Resolvers.Production;
 using LosPr.BLM.Openers;
+using LosPr.BLM.BossFlight;
 
 namespace LosPr.BLM;
 
@@ -14,6 +15,7 @@ internal sealed class BlackMageEventHandler : IRotationEventHandler, IDisposable
     private readonly BlmResolverInputAdapter _resolverInputAdapter;
     private readonly BlmResolverExecutionService _execution;
     private readonly BlmOpenerExecutionService? _opener;
+    private readonly BlmBossFlightService? _bossFlight;
     private readonly IDisposable _actionEffectSubscription;
     private readonly BlmActionEffectPacketFilter _actionEffectPackets = new();
     private readonly ConcurrentQueue<BlmActionEffectAck> _pendingAcks = new();
@@ -28,7 +30,8 @@ internal sealed class BlackMageEventHandler : IRotationEventHandler, IDisposable
         BlmResolverExecutionService execution,
         IBlmClock? clock = null,
         IBlmDebugSink? debugSink = null,
-        BlmOpenerExecutionService? opener = null)
+        BlmOpenerExecutionService? opener = null,
+        BlmBossFlightService? bossFlight = null)
         : this(
             tracker,
             resolverInputAdapter,
@@ -36,7 +39,8 @@ internal sealed class BlackMageEventHandler : IRotationEventHandler, IDisposable
             PromeRotation.Plugin.Instance.LogSystem.Events,
             clock,
             debugSink,
-            opener)
+            opener,
+            bossFlight)
     {
     }
 
@@ -47,7 +51,8 @@ internal sealed class BlackMageEventHandler : IRotationEventHandler, IDisposable
         ILogSystemEventSource actionEffectEvents,
         IBlmClock? clock = null,
         IBlmDebugSink? debugSink = null,
-        BlmOpenerExecutionService? opener = null)
+        BlmOpenerExecutionService? opener = null,
+        BlmBossFlightService? bossFlight = null)
     {
         _tracker = tracker ?? throw new ArgumentNullException(nameof(tracker));
         _resolverInputAdapter = resolverInputAdapter
@@ -55,6 +60,7 @@ internal sealed class BlackMageEventHandler : IRotationEventHandler, IDisposable
         _execution = execution ?? throw new ArgumentNullException(nameof(execution));
         ArgumentNullException.ThrowIfNull(actionEffectEvents);
         _opener = opener;
+        _bossFlight = bossFlight;
         _clock = clock ?? SystemBlmClock.Instance;
         _debug = debugSink ?? NullBlmDebugSink.Instance;
         _actionEffectSubscription =
@@ -81,6 +87,7 @@ internal sealed class BlackMageEventHandler : IRotationEventHandler, IDisposable
                 {
                     _opener?.OnAcceptedAction(ack);
                 }
+                _bossFlight?.OnActionEffect(ack, accepted);
                 var after = _tracker.GetContextSnapshot();
                 PublishDebug(new BlmDebugEventDraft
                 {
@@ -108,6 +115,7 @@ internal sealed class BlackMageEventHandler : IRotationEventHandler, IDisposable
             };
             _tracker.Reconcile(context);
             var afterGauge = _tracker.GetContextSnapshot();
+            _bossFlight?.ObserveContext(afterGauge);
             if (afterGauge.Tracker.LastGaugeReconciledAtMs > 0
                 && (afterGauge.Tracker.LastGaugeReconciledAtMs
                         != beforeGauge.Tracker.LastGaugeReconciledAtMs
@@ -193,20 +201,23 @@ internal sealed class BlackMageEventHandler : IRotationEventHandler, IDisposable
         var before = _tracker.GetContextSnapshot();
         _tracker.BeginCombat();
         var after = _tracker.GetContextSnapshot();
+        _bossFlight?.OnBattleStarted(after);
         _execution.InvalidateFrame();
         TraceLifecycle("BattleStarted", "战斗开始", before, after);
     }
 
     public void OnBattleUpdate()
     {
+        _bossFlight?.ObserveContext(_tracker.GetContextSnapshot());
     }
 
     public void OnNoTarget()
     {
         var context = _tracker.GetContextSnapshot();
+        _bossFlight?.MarkNoTarget(context);
         _opener?.Cancel(context, "目标失效");
         _execution.InvalidateFrame();
-        _tracker.CancelIssuedAction();
+        _tracker.CancelTargetDependentIssuedAction();
         if (Interlocked.Exchange(ref _noTargetActive, 1) != 0)
         {
             return;
@@ -242,6 +253,7 @@ internal sealed class BlackMageEventHandler : IRotationEventHandler, IDisposable
         UI.BlmHotkeyCatalog.ClearPending();
         _tracker.EndCombat();
         var after = _tracker.GetContextSnapshot();
+        _bossFlight?.Reset();
         _execution.InvalidateFrame();
         PromeSettings.Instance.OpenerHasBeenExecuted = false;
         TraceLifecycle("BattleEnded", "战斗结束", before, after);
@@ -254,6 +266,7 @@ internal sealed class BlackMageEventHandler : IRotationEventHandler, IDisposable
         _opener?.Cancel(before, "区域切换");
         _tracker.OnTerritoryChanged(territoryId);
         var after = _tracker.GetContextSnapshot();
+        _bossFlight?.Reset();
         _execution.InvalidateFrame();
         PromeSettings.Instance.OpenerHasBeenExecuted = false;
         TraceLifecycle(
@@ -281,6 +294,7 @@ internal sealed class BlackMageEventHandler : IRotationEventHandler, IDisposable
         });
         _disposed = true;
         _opener?.Cancel(_tracker.GetContextSnapshot(), "事件处理器停止");
+        _bossFlight?.Reset();
         _execution.InvalidateFrame();
         _actionEffectSubscription.Dispose();
         EventManager.OnPlayerDied -= OnPlayerDied;
@@ -383,6 +397,7 @@ internal sealed class BlackMageEventHandler : IRotationEventHandler, IDisposable
             _opener?.Cancel(before, "角色死亡");
             UI.BlmHotkeyCatalog.ClearPending();
             _tracker.OnPlayerDied();
+            _bossFlight?.Reset();
             _execution.InvalidateFrame();
             TraceLifecycle(
                 "PlayerDied",
@@ -402,6 +417,7 @@ internal sealed class BlackMageEventHandler : IRotationEventHandler, IDisposable
         {
             var before = _tracker.GetContextSnapshot();
             _tracker.OnPlayerRevived();
+            _bossFlight?.Reset();
             _execution.InvalidateFrame();
             TraceLifecycle(
                 "PlayerRevived",

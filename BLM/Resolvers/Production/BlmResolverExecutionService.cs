@@ -252,7 +252,7 @@ internal sealed class BlmResolverExecutionService
     {
         var snapshot = _tracker.GetTrackerSnapshot();
         return snapshot.HasPendingIssuedAction
-            && !BlmSkillBook.IsKnownSelfAbilityId(snapshot.PendingIssuedActionId);
+            && !BlmSkillBook.IsKnownSelfTargetActionId(snapshot.PendingIssuedActionId);
     }
 
     private static bool CanDeliverOffGcd(BlmContext context)

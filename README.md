@@ -69,8 +69,8 @@ dotnet run --project .\Tests\Los.Tests.csproj -c Release --no-build `
 推送 `v*` 标签，或在 GitHub Actions 中手动运行 `Build and Release` 并填写版本号，即可自动完成 API15 SDK 恢复、Release 构建、`Los.zip` 和 `repo.json` 生成、SHA-256 计算与 GitHub Release 发布：
 
 ```powershell
-git tag v0.1.4
-git push origin v0.1.4
+git tag v0.1.5
+git push origin v0.1.5
 ```
 
 自动发布不会打包 PromeRotation、Dalamud 或 ECommons，仅包含运行所需的 `Los.dll` 与 `Los.deps.json`。
@@ -81,7 +81,7 @@ git push origin v0.1.4
 .\scripts\New-AcrRelease.ps1 `
   -PromeRotationDir <PromeRotation 插件目录> `
   -DalamudHooksDir <Dalamud Hooks 目录> `
-  -Version 0.1.4
+  -Version 0.1.5
 ```
 
 构建输出：

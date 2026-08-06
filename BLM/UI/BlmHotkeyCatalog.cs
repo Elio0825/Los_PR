@@ -1,5 +1,6 @@
 using Dalamud.Interface.Textures.TextureWraps;
 using PromeRotation.Data;
+using PromeRotation.Resolvers;
 using GameActionManager = FFXIVClientStructs.FFXIV.Client.Game.ActionManager;
 
 namespace LosPr.BLM.UI;
@@ -27,19 +28,44 @@ internal static class BlmHotkeyCatalog
 {
     private const uint DefaultLimitBreakIconActionId = 203u;
     private const uint DefaultPotionItemId = 49237u;
-    private const long ManualAbilityPendingTimeoutMs = 10_000;
+    private const long ManualAbilityIntentTimeoutMs = 5_000;
+    private const long ManualAbilityAckTimeoutMs = 2_000;
+    private const long ManualAbilityRetryDelayMs = 250;
     private const long ManualAbilityObservedTimeoutMs = 2_000;
+    private const int ManualAbilityMaxAttempts = 3;
+    private const float ManualAbilityAnimationLockThreshold = 0.05f;
     private const long PotionPendingTimeoutMs = 5_000;
 
     private static readonly ConcurrentDictionary<uint, uint> ItemIconIds = new();
-    private static readonly ConcurrentDictionary<uint, long> ManualAbilityPending = new();
+    private static readonly Dictionary<uint, ManualAbilityRequest> ManualAbilityPending = new();
     private static readonly ConcurrentDictionary<uint, long> ManualAbilityObserved = new();
+    private static readonly object ManualAbilityGate = new();
     private static readonly object PotionGate = new();
     private static Func<bool>? _openerActiveProvider;
     private static uint _pendingPotionItemId;
     private static long _pendingPotionExpiresAtMs;
     private static long _nextPotionAttemptAtMs;
     private static int _potionAttemptCount;
+
+    private sealed class ManualAbilityRequest
+    {
+        public ManualAbilityRequest(
+            in BlmHotkeyDefinition definition,
+            PAction action,
+            long now)
+        {
+            Definition = definition;
+            Action = action;
+            ExpiresAtMs = now + ManualAbilityIntentTimeoutMs;
+        }
+
+        public BlmHotkeyDefinition Definition { get; }
+        public PAction Action { get; }
+        public long ExpiresAtMs { get; set; }
+        public long NextAttemptAtMs { get; set; }
+        public int Attempts { get; set; }
+        public bool AwaitingAck { get; set; }
+    }
 
     public static IReadOnlyList<BlmHotkeyDefinition> Entries { get; } =
     [
@@ -72,8 +98,11 @@ internal static class BlmHotkeyCatalog
     {
         get
         {
-            CleanupExpiredManualPending();
-            return !ManualAbilityPending.IsEmpty;
+            lock (ManualAbilityGate)
+            {
+                CleanupExpiredManualPendingNoLock(Environment.TickCount64);
+                return ManualAbilityPending.Count > 0;
+            }
         }
     }
 
@@ -165,8 +194,11 @@ internal static class BlmHotkeyCatalog
 
         if (definition.Type == ActionType.OffGcd)
         {
-            CleanupExpiredManualPending();
-            return ManualAbilityPending.ContainsKey(actionId);
+            lock (ManualAbilityGate)
+            {
+                CleanupExpiredManualPendingNoLock(Environment.TickCount64);
+                return ManualAbilityPending.ContainsKey(actionId);
+            }
         }
 
         try
@@ -267,10 +299,13 @@ internal static class BlmHotkeyCatalog
         if (actionId == 0)
             return;
 
-        if (ManualAbilityPending.TryRemove(actionId, out _))
+        lock (ManualAbilityGate)
         {
-            ManualAbilityObserved[actionId] = Environment.TickCount64
-                + ManualAbilityObservedTimeoutMs;
+            if (ManualAbilityPending.Remove(actionId))
+            {
+                ManualAbilityObserved[actionId] = Environment.TickCount64
+                    + ManualAbilityObservedTimeoutMs;
+            }
         }
 
         lock (PotionGate)
@@ -291,8 +326,11 @@ internal static class BlmHotkeyCatalog
 
     public static void ClearPending()
     {
-        ManualAbilityPending.Clear();
-        ManualAbilityObserved.Clear();
+        lock (ManualAbilityGate)
+        {
+            ManualAbilityPending.Clear();
+            ManualAbilityObserved.Clear();
+        }
         lock (PotionGate)
             ClearPendingPotionNoLock();
     }
@@ -343,15 +381,11 @@ internal static class BlmHotkeyCatalog
         in BlmHotkeyDefinition definition,
         uint actionId)
     {
-        CleanupExpiredManualPending();
-        if (ManualAbilityPending.ContainsKey(actionId))
-            return false;
-
         var cooldown = GetCooldown(definition);
         if (cooldown > 0.05f && GetCharges(definition) == 0)
             return false;
 
-        var action = new PAction(actionId, ActionType.Always, definition.Target);
+        var action = new PAction(actionId, definition.Type, definition.Target);
         if (definition.UseMouseGround)
         {
             action.IsLocationAction = true;
@@ -360,30 +394,57 @@ internal static class BlmHotkeyCatalog
 
         try
         {
-            ManualAbilityPending[actionId] = Environment.TickCount64
-                + ManualAbilityPendingTimeoutMs;
-            ActionQueueManager.Enqueue(action, isHighPriority: true);
+            var now = Environment.TickCount64;
+            lock (ManualAbilityGate)
+            {
+                CleanupExpiredManualPendingNoLock(now);
+                if (ManualAbilityPending.ContainsKey(actionId))
+                {
+                    return false;
+                }
+
+                ManualAbilityPending[actionId] = new ManualAbilityRequest(
+                    definition,
+                    action,
+                    now);
+            }
+
             Svc.Log.Info(
-                $"[Los Hotkey] 强制能力技已排入 Always：{definition.Name}({actionId})，"
+                $"[Los Hotkey] 手动能力技进入等待：{definition.Name}({actionId})，"
                 + $"Casting={PRCore.Me?.IsCasting == true}，"
                 + $"GcdRemain={ActionHelper.GetGcdRemain():0.000}s");
             return true;
         }
         catch (Exception exception)
         {
-            ManualAbilityPending.TryRemove(actionId, out _);
-            Svc.Log.Warning(exception, $"[Los] Hotkey 强制能力技入队失败：{definition.Name}。");
+            lock (ManualAbilityGate)
+                ManualAbilityPending.Remove(actionId);
+            Svc.Log.Warning(exception, $"[Los] Hotkey 手动能力技注册失败：{definition.Name}。");
             return false;
         }
     }
 
     private static void CleanupExpiredManualPending()
     {
-        var now = Environment.TickCount64;
-        foreach (var pending in ManualAbilityPending)
+        lock (ManualAbilityGate)
         {
-            if (pending.Value <= now)
-                ManualAbilityPending.TryRemove(pending.Key, out _);
+            CleanupExpiredManualPendingNoLock(Environment.TickCount64);
+        }
+    }
+
+    private static void CleanupExpiredManualPendingNoLock(long now)
+    {
+        var pendingSnapshot = new List<KeyValuePair<uint, ManualAbilityRequest>>(
+            ManualAbilityPending);
+        foreach (var pending in pendingSnapshot)
+        {
+            if (!pending.Value.AwaitingAck && pending.Value.ExpiresAtMs <= now)
+            {
+                ManualAbilityPending.Remove(pending.Key);
+                Svc.Log.Warning(
+                    $"[Los Hotkey] 手动能力技等待超时：{pending.Value.Definition.Name}({pending.Key})，"
+                    + $"Attempts={pending.Value.Attempts}，AwaitingAck={pending.Value.AwaitingAck}");
+            }
         }
 
         foreach (var observed in ManualAbilityObserved)
@@ -395,6 +456,8 @@ internal static class BlmHotkeyCatalog
 
     public static void ProcessPendingDirectActions()
     {
+        ProcessPendingManualAbilities();
+
         uint itemId;
         lock (PotionGate)
         {
@@ -447,6 +510,144 @@ internal static class BlmHotkeyCatalog
             $"[Los Hotkey] 爆发药提交：Item={itemId}，Normalized={normalizedItemId}，"
             + $"Attempt={_potionAttemptCount}，UseActionReturn={dispatched}，"
             + $"GcdRemain={ActionHelper.GetGcdRemain():0.000}s");
+    }
+
+    private static void ProcessPendingManualAbilities()
+    {
+        var now = Environment.TickCount64;
+        ManualAbilityRequest[] requests;
+        lock (ManualAbilityGate)
+        {
+            CleanupExpiredManualPendingNoLock(now);
+            requests = new List<ManualAbilityRequest>(ManualAbilityPending.Values).ToArray();
+        }
+
+        foreach (var request in requests)
+        {
+            if (request.AwaitingAck)
+            {
+                if (now < request.ExpiresAtMs)
+                    continue;
+
+                lock (ManualAbilityGate)
+                {
+                    if (!ManualAbilityPending.TryGetValue(request.Action.ActionId, out var current)
+                        || !ReferenceEquals(current, request))
+                    {
+                        continue;
+                    }
+
+                    ManualAbilityPending.Remove(request.Action.ActionId);
+                    ManualAbilityObserved[request.Action.ActionId] = now
+                        + ManualAbilityObservedTimeoutMs;
+                }
+
+                Svc.Log.Warning(
+                    $"[Los Hotkey] 手动能力技等待服务器回执超时：{request.Definition.Name}"
+                    + $"({request.Action.ActionId})，Attempts={request.Attempts}");
+                continue;
+            }
+
+            if (now < request.NextAttemptAtMs)
+                continue;
+
+            if (!IsManualAbilityWindowReady(request))
+                continue;
+
+            var dispatched = DispatchManualAbility(request.Action);
+            var submittedAt = Environment.TickCount64;
+            lock (ManualAbilityGate)
+            {
+                if (!ManualAbilityPending.TryGetValue(request.Action.ActionId, out var current)
+                    || !ReferenceEquals(current, request))
+                {
+                    continue;
+                }
+
+                request.Attempts++;
+                if (dispatched)
+                {
+                    request.AwaitingAck = true;
+                    request.ExpiresAtMs = submittedAt + ManualAbilityAckTimeoutMs;
+                }
+                else if (request.Attempts >= ManualAbilityMaxAttempts)
+                {
+                    ManualAbilityPending.Remove(request.Action.ActionId);
+                }
+                else
+                {
+                    request.NextAttemptAtMs = submittedAt + ManualAbilityRetryDelayMs;
+                }
+            }
+
+            Svc.Log.Info(
+                $"[Los Hotkey] 手动能力技提交：{request.Definition.Name}"
+                + $"({request.Action.ActionId})，Attempt={request.Attempts}，"
+                + $"UseActionReturn={dispatched}，Casting={PRCore.Me?.IsCasting == true}，"
+                + $"GcdRemain={ActionHelper.GetGcdRemain():0.000}s");
+        }
+    }
+
+    private static bool IsManualAbilityWindowReady(ManualAbilityRequest request)
+    {
+        if (PromeSettings.Instance.EnableAcr != AcrState.On
+            || PRGameData.IsPlayerOccupied())
+        {
+            return false;
+        }
+
+        if (PRCore.Me?.IsCasting == true
+            || ActionHelper.GetAnimationLock() > ManualAbilityAnimationLockThreshold)
+        {
+            return false;
+        }
+
+        var cooldown = GetCooldown(request.Definition);
+        if (cooldown > 0.05f && GetCharges(request.Definition) == 0)
+            return false;
+
+        if (request.Action.IsLocationAction)
+            return true;
+
+        try
+        {
+            return TargetResolver.Resolve(request.Action.Target) != null;
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
+    private static unsafe bool DispatchManualAbility(PAction action)
+    {
+        try
+        {
+            var actionManager = GameActionManager.Instance();
+            if (actionManager == null)
+                return false;
+
+            var gameActionType = FFXIVClientStructs.FFXIV.Client.Game.ActionType.Action;
+            if (action.IsLocationAction)
+            {
+                var position = action.Position;
+                return actionManager->UseActionLocation(gameActionType, action.ActionId, 0, &position);
+            }
+
+            var targetObject = TargetResolver.Resolve(action.Target);
+            if (targetObject == null)
+                return false;
+
+            return actionManager->UseAction(
+                gameActionType,
+                action.ActionId,
+                targetObject.GameObjectId);
+        }
+        catch (Exception exception)
+        {
+            Svc.Log.Warning(exception, $"[Los] 手动能力技调用失败：{action.ActionId}");
+            return false;
+        }
     }
 
     private static bool TryQueuePotion(uint itemId)

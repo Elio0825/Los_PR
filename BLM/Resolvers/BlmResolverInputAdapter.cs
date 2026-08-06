@@ -543,6 +543,7 @@ internal sealed class BlmResolverInputAdapter
 
     private static bool UsesSelfTarget(uint actionId)
         => actionId is BLMSkill.星灵移位
+            or BLMSkill.灵极魂
             or MageUniversalSkill.即刻咏唱
             or BLMSkill.三连咏唱
             or MageUniversalSkill.醒梦

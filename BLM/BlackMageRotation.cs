@@ -1,4 +1,5 @@
 using LosPr.BLM.Openers;
+using LosPr.BLM.BossFlight;
 using LosPr.BLM.Resolvers;
 using LosPr.BLM.Resolvers.Production;
 using LosPr.BLM.Timeline;
@@ -10,7 +11,7 @@ namespace LosPr.BLM;
     25u,
     "Los 黑魔ACR",
     "Los",
-    "0.1.4",
+    "0.1.5",
     ContentScope = AcrContentScope.All)]
 public sealed class BlackMageRotation : IRotation, IRotationMeta, IRotationLifecycle, IDisposable
 {
@@ -21,6 +22,7 @@ public sealed class BlackMageRotation : IRotation, IRotationMeta, IRotationLifec
         {
             ["AOE"] = true,
             ["智能AOE"] = false,
+            ["Boss上天"] = false,
             ["Dot"] = true,
             ["TTK"] = false,
             ["移动通晓"] = true,
@@ -55,6 +57,7 @@ public sealed class BlackMageRotation : IRotation, IRotationMeta, IRotationLifec
     private readonly BlackMageSettingsStore _settingsStore;
     private readonly BlmDebugTraceService _debugTrace;
     private readonly BlmStateTracker _tracker;
+    private readonly BlmBossFlightService _bossFlight;
     private readonly BlmResolverInputAdapter _resolverInputAdapter;
     private readonly BlmResolverExecutionService _execution;
     private readonly BlmOpenerExecutionService _openerExecution;
@@ -121,6 +124,7 @@ public sealed class BlackMageRotation : IRotation, IRotationMeta, IRotationLifec
             BlmContext.Capture(clock),
             clock,
             normalizer);
+        _bossFlight = new BlmBossFlightService(_tracker, clock, normalizer);
         _resolverInputAdapter = new BlmResolverInputAdapter(
             settingsProvider: () => _settingsStore.Settings);
         _execution = new BlmResolverExecutionService(_tracker, _debugTrace);
@@ -165,7 +169,8 @@ public sealed class BlackMageRotation : IRotation, IRotationMeta, IRotationLifec
             _execution,
             clock,
             _debugTrace,
-            _openerExecution);
+            _openerExecution,
+            _bossFlight);
         _timelineContextProvider = _tracker.GetContextSnapshot;
         BlmTimelineRuntime.SetContextProvider(_timelineContextProvider);
 
@@ -190,6 +195,14 @@ public sealed class BlackMageRotation : IRotation, IRotationMeta, IRotationLifec
             return _openerExecution.Resolve(BlmResolverChannel.Always, context);
         }
 
+        if (!HasHighPriorityAction()
+            && _bossFlight.Resolve(
+                BlmResolverChannel.Always,
+                context) is { } bossFlightAction)
+        {
+            return bossFlightAction;
+        }
+
         return _execution.Resolve(
             BlmResolverChannel.Always,
             context,
@@ -202,6 +215,14 @@ public sealed class BlackMageRotation : IRotation, IRotationMeta, IRotationLifec
         if (_openerExecution.OwnsExecution)
         {
             return _openerExecution.Resolve(BlmResolverChannel.Gcd, context);
+        }
+
+        if (!HasHighPriorityAction()
+            && _bossFlight.Resolve(
+                BlmResolverChannel.Gcd,
+                context) is { } bossFlightAction)
+        {
+            return bossFlightAction;
         }
 
         return _execution.Resolve(
