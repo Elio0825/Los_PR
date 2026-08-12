@@ -21,7 +21,7 @@
 
   <ItemGroup>
     <PackageReference Include="PromeRotation.SDK.API15"
-                      Version="0.1.0-preview.6"
+                      Version="0.1.0-preview.8"
                       PrivateAssets="all" />
   </ItemGroup>
 </Project>

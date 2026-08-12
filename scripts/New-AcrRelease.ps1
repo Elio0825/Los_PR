@@ -6,7 +6,7 @@ param(
     [Parameter(Mandatory = $true)]
     [string]$DalamudHooksDir,
 
-    [string]$Version = "0.1.5",
+    [string]$Version = "0.1.6",
 
     [string]$OutputDirectory = ""
 )
@@ -43,6 +43,7 @@ if ($rotationSource -notmatch 'ContentScope\s*=\s*AcrContentScope\.All') {
 $commonProperties = @(
     "-p:PromeRotationDir=$PromeRotationDir",
     "-p:DalamudHooksDir=$DalamudHooksDir",
+    "-p:Version=$Version",
     "-p:TreatWarningsAsErrors=true"
 )
 

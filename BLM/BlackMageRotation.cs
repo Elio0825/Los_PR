@@ -11,7 +11,7 @@ namespace LosPr.BLM;
     25u,
     "Los 黑魔ACR",
     "Los",
-    "0.1.5",
+    "0.1.6",
     ContentScope = AcrContentScope.All)]
 public sealed class BlackMageRotation : IRotation, IRotationMeta, IRotationLifecycle, IDisposable
 {

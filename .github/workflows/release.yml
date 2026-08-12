@@ -4,9 +4,9 @@ on:
   workflow_dispatch:
     inputs:
       version:
-        description: "Release version, e.g. 0.1.5"
+        description: "Release version, e.g. 0.1.6"
         required: true
-        default: "0.1.5"
+        default: "0.1.6"
   push:
     tags:
       - "v*"
@@ -22,6 +22,7 @@ env:
   ACR_AUTHOR: "Los"
   ACR_DESCRIPTION: "一个全等级黑魔ACR 支持日随/高难"
   ACR_API_VERSION: "15"
+  ACR_REFERENCE_PROME_VERSION: "1.5.9.4"
   ACR_SOURCE_REPOSITORY_URL: "https://github.com/Elio0825/Los_PR"
 
 jobs:
@@ -60,34 +61,6 @@ jobs:
       - name: Restore
         shell: pwsh
         run: dotnet restore $env:PROJECT_PATH
-
-      - name: Read reference PromeRotation version
-        id: references
-        shell: pwsh
-        run: |
-          $assetsPath = "${{ github.workspace }}\obj\project.assets.json"
-          if (-not (Test-Path -LiteralPath $assetsPath)) {
-            throw "project.assets.json not found at $assetsPath"
-          }
-
-          $assets = Get-Content -LiteralPath $assetsPath -Raw | ConvertFrom-Json
-          $sdkKey = ($assets.libraries | Get-Member -MemberType NoteProperty).Name |
-            Where-Object { $_ -like "PromeRotation.SDK.API15/*" } |
-            Select-Object -First 1
-
-          if (-not $sdkKey) {
-            throw "PromeRotation.SDK.API15 not found in project.assets.json"
-          }
-
-          $packageFolder = Join-Path $env:NUGET_PACKAGES $assets.libraries.$sdkKey.path
-          $promeDll = Join-Path $packageFolder "ref\net10.0-windows7.0\PromeRotation.dll"
-          if (-not (Test-Path -LiteralPath $promeDll)) {
-            throw "PromeRotation.dll not found at $promeDll"
-          }
-
-          $promeVersion = [System.Reflection.AssemblyName]::GetAssemblyName($promeDll).Version.ToString()
-          Write-Host "referencePromeVersion = $promeVersion"
-          "prome_version=$promeVersion" >> $env:GITHUB_OUTPUT
 
       - name: Sync rotation version
         shell: pwsh
@@ -162,7 +135,7 @@ jobs:
               }
             )
             apiVersion = [int]"${{ env.ACR_API_VERSION }}"
-            referencePromeVersion = "${{ steps.references.outputs.prome_version }}"
+            referencePromeVersion = "${{ env.ACR_REFERENCE_PROME_VERSION }}"
             downloadUrl = "${{ github.server_url }}/${{ github.repository }}/releases/latest/download/Los.zip"
             sourceRepositoryUrl = "${{ env.ACR_SOURCE_REPOSITORY_URL }}"
             sha256 = "${{ steps.package.outputs.sha256 }}"

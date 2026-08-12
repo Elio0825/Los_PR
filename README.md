@@ -37,7 +37,7 @@ Los 是面向 PromeRotation 的《最终幻想 XIV》黑魔法师 ACR，实现�
 
 - Windows
 - .NET 10 SDK
-- PromeRotation `1.5.6.1` 或更高兼容版本（运行时）
+- PromeRotation `1.5.9.4` 或更高兼容版本（运行时）
 
 `Los.csproj` 使用 `PromeRotation.SDK.API15` NuGet 包提供编译期引用，因此普通构建不依赖本机 XIVLauncherCN 安装目录。本地测试仍使用真实的 PromeRotation 与 Dalamud DLL，可通过 MSBuild 属性指定路径：
 
@@ -62,15 +62,15 @@ dotnet run --project .\Tests\Los.Tests.csproj -c Release --no-build `
   -p:DalamudHooksDir=<Dalamud Hooks 目录>
 ```
 
-当前测试覆盖 18 个测试组，包括多等级单体/AOE Resolver、Tracker 生命周期、新日志 ActionEffect 接入、起手恢复、时间轴、爆发药 Hotkey、快捷键持久化、Debug 日志和 DLL 公共 API 边界。
+当前测试覆盖 19 个测试组，包括多等级单体/AOE Resolver、Tracker 生命周期、新日志 ActionEffect 接入、起手恢复、时间轴、爆发药 Hotkey、快捷键持久化、Debug 日志和 DLL 公共 API 边界。
 
 ## 自动发布
 
 推送 `v*` 标签，或在 GitHub Actions 中手动运行 `Build and Release` 并填写版本号，即可自动完成 API15 SDK 恢复、Release 构建、`Los.zip` 和 `repo.json` 生成、SHA-256 计算与 GitHub Release 发布：
 
 ```powershell
-git tag v0.1.5
-git push origin v0.1.5
+git tag v0.1.6
+git push origin v0.1.6
 ```
 
 自动发布不会打包 PromeRotation、Dalamud 或 ECommons，仅包含运行所需的 `Los.dll` 与 `Los.deps.json`。
@@ -81,7 +81,7 @@ git push origin v0.1.5
 .\scripts\New-AcrRelease.ps1 `
   -PromeRotationDir <PromeRotation 插件目录> `
   -DalamudHooksDir <Dalamud Hooks 目录> `
-  -Version 0.1.5
+  -Version 0.1.6
 ```
 
 构建输出：
