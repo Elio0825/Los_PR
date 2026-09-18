@@ -22,7 +22,6 @@ env:
   ACR_AUTHOR: "Los"
   ACR_DESCRIPTION: "一个全等级黑魔ACR 支持日随/高难"
   ACR_API_VERSION: "15"
-  ACR_REFERENCE_PROME_VERSION: "1.5.9.4"
   ACR_SOURCE_REPOSITORY_URL: "https://github.com/Elio0825/Los_PR"
 
 jobs:
@@ -68,7 +67,7 @@ jobs:
           $path = "${{ github.workspace }}\${{ env.ROTATION_PATH }}"
           $version = "${{ steps.version.outputs.version }}"
           $text = Get-Content -LiteralPath $path -Raw
-          $pattern = '(?s)(\[RotationMetadata\(\s*25u,\s*"Los 黑魔ACR",\s*"Los",\s*")[^"]+("\s*,)'
+          $pattern = '(?s)(\[RotationMetadata\(\s*25u,\s*(?:"Los 黑魔ACR"|LosPlatform\.RotationName),\s*(?:"Los"|LosPlatform\.Author),\s*")[^"]+("\s*,)'
           $regex = [regex]::new($pattern)
 
           if (-not $regex.IsMatch($text)) {
@@ -81,6 +80,7 @@ jobs:
           Write-Host "RotationMetadata version updated to $version"
 
       - name: Build
+        id: build
         shell: pwsh
         run: |
           $publishDir = "${{ runner.temp }}\publish"
@@ -92,6 +92,7 @@ jobs:
             -p:OutputPath="$publishDir" `
             -p:AppendTargetFrameworkToOutputPath=false `
             -p:AppendRuntimeIdentifierToOutputPath=false
+          if ($LASTEXITCODE -ne 0) { throw "CN Release build failed." }
 
           $dllPath = Join-Path $publishDir "${{ env.ASSEMBLY_NAME }}.dll"
           $depsPath = Join-Path $publishDir "${{ env.ASSEMBLY_NAME }}.deps.json"
@@ -101,6 +102,17 @@ jobs:
           if (-not (Test-Path -LiteralPath $depsPath)) {
             throw "Build output not found: $depsPath"
           }
+
+          $referenceJson = dotnet msbuild $env:PROJECT_PATH -nologo -verbosity:quiet `
+            -p:Configuration=Release -target:ResolveReferences -getItem:ReferencePath
+          if ($LASTEXITCODE -ne 0) { throw "Could not resolve CN compiler references." }
+          $resolved = ($referenceJson -join [Environment]::NewLine) | ConvertFrom-Json
+          $promeReference = @($resolved.Items.ReferencePath | Where-Object {
+            [IO.Path]::GetFileName($_.Identity) -eq 'PromeRotation.dll'
+          })
+          if ($promeReference.Count -ne 1) { throw "Expected one PR compiler reference." }
+          $referenceVersion = [Reflection.AssemblyName]::GetAssemblyName($promeReference[0].Identity).Version
+          "reference_prome_version=$referenceVersion" >> $env:GITHUB_OUTPUT
 
       - name: Package release
         id: package
@@ -135,7 +147,7 @@ jobs:
               }
             )
             apiVersion = [int]"${{ env.ACR_API_VERSION }}"
-            referencePromeVersion = "${{ env.ACR_REFERENCE_PROME_VERSION }}"
+            referencePromeVersion = "${{ steps.build.outputs.reference_prome_version }}"
             downloadUrl = "${{ github.server_url }}/${{ github.repository }}/releases/latest/download/Los.zip"
             sourceRepositoryUrl = "${{ env.ACR_SOURCE_REPOSITORY_URL }}"
             sha256 = "${{ steps.package.outputs.sha256 }}"

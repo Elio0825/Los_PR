@@ -1,0 +1,11 @@
+<Project>
+  <PropertyGroup>
+    <ClientRegion Condition="'$(ClientRegion)' == ''">CN</ClientRegion>
+    <TargetFramework Condition="'$(ClientRegion)' == 'CN'">net10.0-windows</TargetFramework>
+    <TargetFramework Condition="'$(ClientRegion)' == 'TC'">net9.0-windows</TargetFramework>
+    <DefineConstants Condition="'$(ClientRegion)' == 'TC'">$(DefineConstants);LOS_TC</DefineConstants>
+    <BaseOutputPath Condition="'$(ClientRegion)' == 'TC'">bin\TC\</BaseOutputPath>
+    <BaseIntermediateOutputPath Condition="'$(ClientRegion)' == 'TC'">obj\TC\</BaseIntermediateOutputPath>
+    <DefaultItemExcludes>$(DefaultItemExcludes);bin\**;obj\**</DefaultItemExcludes>
+  </PropertyGroup>
+</Project>

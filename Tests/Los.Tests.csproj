@@ -2,13 +2,12 @@
 <Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup>
     <OutputType>Exe</OutputType>
-    <TargetFramework>net10.0-windows</TargetFramework>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
     <LangVersion>latest</LangVersion>
     <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
-    <PromeRotationDir Condition="'$(PromeRotationDir)' == ''">D:\ff14\pr</PromeRotationDir>
-    <DalamudHooksDir Condition="'$(DalamudHooksDir)' == ''">C:\Users\Administrator\AppData\Roaming\XIVLauncherCN\addon\Hooks\dev</DalamudHooksDir>
+    <PromeRotationDir Condition="'$(PromeRotationDir)' == '' and '$(ClientRegion)' == 'CN'">D:\ff14\pr</PromeRotationDir>
+    <DalamudHooksDir Condition="'$(DalamudHooksDir)' == '' and '$(ClientRegion)' == 'CN'">C:\Users\Administrator\AppData\Roaming\XIVLauncherCN\addon\Hooks\dev</DalamudHooksDir>
   </PropertyGroup>
 
   <ItemGroup>
@@ -20,5 +19,14 @@
     <Reference Include="FFXIVClientStructs" HintPath="$(DalamudHooksDir)\FFXIVClientStructs.dll" Private="true" />
     <Reference Include="Lumina" HintPath="$(DalamudHooksDir)\Lumina.dll" Private="true" />
     <Reference Include="Lumina.Excel" HintPath="$(DalamudHooksDir)\Lumina.Excel.dll" Private="true" />
+    <Reference Include="Serilog" HintPath="$(TestRuntimeSupportDir)\Serilog.dll" Private="true"
+               Condition="'$(TestRuntimeSupportDir)' != '' and Exists('$(TestRuntimeSupportDir)\Serilog.dll')" />
   </ItemGroup>
+
+  <Target Name="ValidateTestRuntimeDependencies" BeforeTargets="ResolveAssemblyReferences">
+    <Error Condition="!Exists('$(PromeRotationDir)\PromeRotation.dll')"
+           Text="Tests require runtime assemblies: set PromeRotationDir to the $(ClientRegion) PR installation directory." />
+    <Error Condition="!Exists('$(DalamudHooksDir)\Dalamud.dll')"
+           Text="Tests require runtime assemblies: set DalamudHooksDir to the $(ClientRegion) Dalamud installation directory." />
+  </Target>
 </Project>

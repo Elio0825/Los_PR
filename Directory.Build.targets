@@ -1,0 +1,6 @@
+<Project>
+  <Target Name="ValidateClientRegion" BeforeTargets="PrepareForBuild;CollectPackageReferences">
+    <Error Condition="'$(ClientRegion)' != 'CN' and '$(ClientRegion)' != 'TC'"
+           Text="ClientRegion must be CN or TC." />
+  </Target>
+</Project>

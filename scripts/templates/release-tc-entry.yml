@@ -1,0 +1,24 @@
+# Copy to Elio0825/Los_PR-TC/.github/workflows/release.yml.
+# The calling repository's GITHUB_TOKEN publishes only to Los_PR-TC.
+name: Release LOS TC
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "台服版本号，须与源码提交中的 RotationMetadata 版本一致"
+        required: true
+        default: "1.0.0"
+      source_commit:
+        description: "Los_PR 主源码仓库的完整 40 位提交 SHA"
+        required: true
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    uses: Elio0825/Los_PR/.github/workflows/release-tc.yml@main
+    with:
+      version: ${{ inputs.version }}
+      source_commit: ${{ inputs.source_commit }}

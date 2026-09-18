@@ -1,4 +1,5 @@
 using Lumina.Excel.Sheets;
+using LosPr.BLM.Compatibility;
 
 namespace LosPr.BLM.Core;
 
@@ -373,9 +374,7 @@ internal sealed record BlmContext
                 && territory.ContentFinderCondition.ValueNullable is { } content
                 && content.ContentMemberType.ValueNullable is { } memberType)
             {
-                composition = new BlmDutyComposition(
-                    memberType.MembersPerParty,
-                    memberType.PartyCount);
+                composition = PrApiCompatibility.ReadDutyComposition(memberType);
             }
 
             lock (DutyCompositionCacheGate)
@@ -426,7 +425,7 @@ internal sealed record BlmContext
             if (Svc.Objects[index] is not IBattleChara battle
                 || battle.EntityId == center.EntityId
                 || !IsLiveAoeObject(battle.IsTargetable, battle.IsDead, battle.CurrentHp)
-                || battle.ObjectKind == ObjectKind.Pc
+                || battle.ObjectKind == PrApiCompatibility.PlayerObjectKind
                 || !battle.StatusFlags.HasFlag(StatusFlags.Hostile))
             {
                 continue;
@@ -495,7 +494,7 @@ internal sealed record BlmContext
                     candidate.IsTargetable,
                     candidate.IsDead,
                     candidate.CurrentHp)
-                || candidate.ObjectKind == ObjectKind.Pc
+                || candidate.ObjectKind == PrApiCompatibility.PlayerObjectKind
                 || !candidate.CanUseAttackActionOn())
             {
                 continue;

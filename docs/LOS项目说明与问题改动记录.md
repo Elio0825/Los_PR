@@ -4,6 +4,8 @@
 
 记录截止：2026-09-19。本次发布版本为 `v1.0.0`，整合此前本地的起手、移动三连、原地黑魔纹修复，并修复黑魔纹热键的魔纹重置冷却判断和回执匹配。
 
+同日完成台服 API13 / .NET 9 适配，台服首版独立发布为 `v1.0.0`；国服已经发布的同名版本保持原样。按用户要求跳过两服黑魔技能机制对比，沿用现有循环规则，详情见 [台服适配与发布](TC适配与发布.md)。
+
 ## 1. 项目简介
 
 LOS 是面向 PromeRotation（PR）的《最终幻想 XIV》黑魔法师 ACR，目标是把黑魔的单体、AOE、起手、QT、Hotkey、时间轴和诊断能力放在同一套可验证的执行框架中。
@@ -27,10 +29,10 @@ LOS 是第三方项目，与 Square Enix、Dalamud 和 PromeRotation 官方无�
 | 项目 | 当前情况 |
 | --- | --- |
 | 本次发布版本 | `v1.0.0` |
-| PR SDK | API15 SDK |
-| 运行时 | PromeRotation 1.5.9.4 或更高兼容版本 |
-| 目标框架 | `.NET 10` / `net10.0-windows` |
-| 发布产物 | `Los.dll`、`Los.deps.json`、`Los.zip`、`repo.json` |
+| PR SDK | 国服 API15 `0.1.0-preview.8`；台服 TC `0.1.0-preview.2`（API13） |
+| PR 编译引用 | 国服 `1.5.7.2`；台服 `1.3.1.4`；国服本机测试运行版本 `1.5.10.3` |
+| 目标框架 | 国服 `net10.0-windows`；台服 `net9.0-windows` |
+| 发布产物 | 国服 `Los.dll` / `Los.deps.json` / `Los.zip`；台服 `Los.TC.dll` / `Los.TC.deps.json` / `Los.TC.zip`；各自 `repo.json` |
 | 当前本机运行 DLL | `C:\Users\Administrator\AppData\Roaming\XIVLauncherCN\pluginConfigs\PromeRotation\ACR\Los\Los.dll` |
 | 配置文件 | `<PR配置目录>\Settings\ACRConfig\Los\LosSettings.json` |
 | Debug 日志 | `<PR配置目录>\Settings\ACRConfig\Los\DebugLogs` |
@@ -193,7 +195,7 @@ PR 的原生起手由动作列表和 `ActionUpdater` 取队列执行。它可以
 | 主动攻击按钮被 LOS UI 覆盖 | 控制面板覆盖了本体按钮，用户无法找到原按钮 | 已在 LOS 设置面板提供主动攻击入口 |
 | 打开主动攻击后选中目标仍不攻击 | 脱战/目标恢复状态没有重新满足攻击条件 | v0.1.4 已修复 |
 | PR 本体日志精简、过滤 chatlog 是否影响 LOS | LOS 依赖的是 ActionEffect 事件和自身 JSONL，不依赖本地 chatlog 文件输出 | 已确认无直接影响 |
-| TC 服务器 API12 支持 | 需要对照 TC 服务器接口、Action 发送协议、能力技/状态查询和错误重试设计适配层 | 目前只有方案讨论，尚未实现 |
+| TC 服务器支持 | 最新示例及官方 TC SDK 目标已是 API13 / .NET 9，早期 API12 假设已过时；编译差异为玩家枚举和副本成员表字段名 | 已完成同源双构建、必要接口兼容、独立配置/程序集/更新源；两服各 20 组测试通过，台服实机待验证，API12 不在本次范围 |
 
 ## 8. v1.0.0 合入的本地改动
 
@@ -212,6 +214,15 @@ PR 的原生起手由动作列表和 `ActionUpdater` 取队列执行。它可以
 11. 黑魔纹热键按实际技能形态判断、提交和确认；等待期间形态失效取消请求，避免误用新黑魔纹。
 
 v1.0.0 本机验证：Release 主项目及测试项目均为 0 警告、0 错误，20 个测试组全部通过；新增热键组包含 6 个场景。测试使用 PR 1.5.10.3 与 Dalamud 15.0.3.5，游戏内实际释放仍需实战复核。
+
+### 8.1 台服 v1.0.0 适配
+
+- 以 `ClientRegion=CN/TC` 选择 SDK、运行框架、程序集和输出目录；默认 CN 保持原有命令与路径。
+- `BLM/Compatibility/LosPlatform.cs` 统一平台标识；台服作者与配置目录为 `Los-TC`，程序集为 `Los.TC`。
+- `PrApiCompatibility.cs` 兼容 `ObjectKind.Pc/Player` 和 `ContentMemberType` 的两个人数字段。通过真实 Lumina 表行测试确认两套定义读取相同的列偏移 4/5。
+- Resolver、起手、热键、时间轴、Boss 上天和技能机制保持共用；未进行两服技能机制对比。
+- `Los_PR-TC` 独立发布仓库调用主仓库可复用工作流，通过完整源码 SHA 构建并发布，记录编译引用版本与测试来源。
+- 两服 Release 编译均为 0 警告、0 错误，各 20 组测试通过；国服使用真实安装依赖，台服使用补齐 Serilog/Lumina 的 SDK 离线依赖，尚未台服游戏内验证。
 
 ## 9. 配置和默认策略
 
@@ -277,14 +288,16 @@ dotnet run --project .\Tests\Los.Tests.csproj -c Release --no-build `
 
 发布通过 `v*` 标签或 GitHub Actions 的 `Build and Release` 完成。发布脚本会生成 `Los.zip`、`repo.json` 并计算 SHA-256，不会把 PromeRotation、Dalamud 或 ECommons 打进 LOS 压缩包。
 
+上述为国服流程。台服使用 `-p:ClientRegion=TC` 构建；本机离线测试与打包运行 `scripts/New-AcrRelease.ps1 -ClientRegion TC -Version 1.0.0 -SdkOfflineTests`。台服发布从独立仓库 Actions 的 `Release LOS TC` 输入版本和主仓库源码 SHA，要求源码中的元数据版本已匹配，具体见 [台服适配与发布](TC适配与发布.md)。
+
 ## 12. 后续待办和风险
 
 - 实战确认黑魔纹无充能时的魔纹重置、读条中排队以及魔纹到期取消行为。
 - 实战确认移动机制中“空转累计触发、三连立即入队、buff 期间不再入队、buff 耗尽后再次触发”的完整行为。
 - 继续收集即刻进冰窄窗口日志，决定是否加入“冷却转好后至少保留 0.6 秒织入窗口”的判断。
 - 继续检查战斗结束、团灭、目标丢失和副本外热键对下一次起手的影响。
-- 设计并实现 TC API12 服务器适配层，明确服务器接口、技能投递、状态查询和失败重试协议。
-- 保持 PR ActionUpdater、ActionQueueManager 和 API15 SDK 更新后的兼容性验证。
+- 台服实机确认加载、倒计时起手、黑魔纹/魔纹重置热键、移动三连和战斗边界；本次没有核对两服技能机制。
+- 保持 PR ActionUpdater、ActionQueueManager 及 API15/TC API13 SDK 更新后的兼容性验证。
 
 ## 13. 版本记录
 
@@ -300,3 +313,4 @@ dotnet run --project .\Tests\Los.Tests.csproj -c Release --no-build `
 | `v0.1.5` | 加入 Boss 上天 QT，并记录即刻进冰窄窗口问题 |
 | `v0.1.6` | 升级 PR SDK/API15 发布链路 |
 | `v1.0.0` | 黑魔纹热键变体与回执修复；合入倒计时目标绑定、移动三连队列去重、计时与充能修复 |
+| 台服 `v1.0.0` | 同源 CN/TC 双构建、API13 必要接口兼容、独立程序集/配置/更新源；沿用现有循环，待台服实机验证 |

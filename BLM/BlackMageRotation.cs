@@ -1,4 +1,5 @@
 using LosPr.BLM.Openers;
+using LosPr.BLM.Compatibility;
 using LosPr.BLM.BossFlight;
 using LosPr.BLM.Resolvers;
 using LosPr.BLM.Resolvers.Production;
@@ -9,8 +10,8 @@ namespace LosPr.BLM;
 
 [RotationMetadata(
     25u,
-    "Los 黑魔ACR",
-    "Los",
+    LosPlatform.RotationName,
+    LosPlatform.Author,
     "1.0.0",
     ContentScope = AcrContentScope.All)]
 public sealed class BlackMageRotation : IRotation, IRotationMeta, IRotationLifecycle, IDisposable

@@ -1,8 +1,9 @@
+using LosPr.BLM.Compatibility;
+
 namespace LosPr.BLM.Data;
 
 internal sealed class BlackMageSettingsStore : IDisposable
 {
-    private const string Author = "Los";
     private const string SettingsFileName = "LosSettings.json";
     private static readonly TimeSpan SaveDebounce = TimeSpan.FromMilliseconds(500);
     private static readonly UTF8Encoding Utf8WithoutBom = new(false);
@@ -132,7 +133,7 @@ internal sealed class BlackMageSettingsStore : IDisposable
 
     private static string ResolveSettingsDirectory()
     {
-        // 新版 PR 等价于直接调用 ACRAuthorSetting.GetSettingsDirectory("Los")。
+        // 新版 PR 等价于直接调用 ACRAuthorSetting.GetSettingsDirectory(LosPlatform.Author)。
         const string settingTypeName = "PromeRotation.Config.ACRAuthorSetting";
         try
         {
@@ -144,7 +145,7 @@ internal sealed class BlackMageSettingsStore : IDisposable
                 types: [typeof(string)],
                 modifiers: null);
 
-            if (getDirectory?.Invoke(null, [Author]) is string directory
+            if (getDirectory?.Invoke(null, [LosPlatform.Author]) is string directory
                 && !string.IsNullOrWhiteSpace(directory))
             {
                 return directory;
@@ -156,11 +157,8 @@ internal sealed class BlackMageSettingsStore : IDisposable
         }
 
         // PR 1.5.2.x 尚未公开 ACRAuthorSetting；目录结构与新 API 保持一致。
-        var compatibilityDirectory = Path.Combine(
-            Svc.PluginInterface.ConfigDirectory.FullName,
-            "Settings",
-            "ACRConfig",
-            Author);
+        var compatibilityDirectory = LosPlatform.GetCompatibilitySettingsDirectory(
+            Svc.PluginInterface.ConfigDirectory.FullName);
         Directory.CreateDirectory(compatibilityDirectory);
         Svc.Log.Warning("[Los] 当前 PR 未公开 ACRAuthorSetting，使用兼容配置目录。");
         return compatibilityDirectory;

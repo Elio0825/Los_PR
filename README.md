@@ -36,11 +36,14 @@ Los 是面向 PromeRotation 的《最终幻想 XIV》黑魔法师 ACR，实现�
 
 ## 环境要求
 
-- Windows
-- .NET 10 SDK
-- PromeRotation `1.5.9.4` 或更高兼容版本（运行时）
+- Windows；构建使用 .NET 10 SDK（可同时编译下列目标框架）。
 
-`Los.csproj` 使用 `PromeRotation.SDK.API15` NuGet 包提供编译期引用，因此普通构建不依赖本机 XIVLauncherCN 安装目录。本地测试仍使用真实的 PromeRotation 与 Dalamud DLL，可通过 MSBuild 属性指定路径：
+| 客户端 | 构建属性 | 运行框架 | 编译 SDK | PR 参考版本 |
+| --- | --- | --- | --- | --- |
+| 国服 | `ClientRegion=CN`（默认） | .NET 10 / API15 | `PromeRotation.SDK.API15` `0.1.0-preview.8` | 编译引用 `1.5.7.2`；本机测试 `1.5.10.3` |
+| 台服 | `ClientRegion=TC` | .NET 9 / API13 | `PromeRotation.SDK.TC` `0.1.0-preview.2` | `1.3.1.4` |
+
+`Los.csproj` 按客户端选择 NuGet 编译期引用，普通构建不依赖本机游戏安装目录。运行验证应使用对应客户端的 PromeRotation 与 Dalamud DLL，可通过 MSBuild 属性指定路径：
 
 ```powershell
 -p:PromeRotationDir=<PromeRotation 插件目录>
@@ -65,6 +68,18 @@ dotnet run --project .\Tests\Los.Tests.csproj -c Release --no-build `
 
 测试覆盖多等级单体/AOE Resolver、Tracker 生命周期、新日志 ActionEffect 接入、起手恢复、时间轴、爆发药 Hotkey、黑魔纹热键技能形态与回执、快捷键持久化、Debug 日志和 DLL 公共 API 边界。
 
+台服构建：
+
+```powershell
+dotnet build .\Los.csproj -c Release `
+  -p:ClientRegion=TC `
+  -p:TreatWarningsAsErrors=true
+```
+
+台服测试同样传入 `-p:ClientRegion=TC`，依赖目录必须属于台服。国服输出位于 `bin\Release\net10.0-windows\`，台服位于 `bin\TC\Release\net9.0-windows\`；中间文件也按客户端隔离。
+
+台服适配复用现有循环规则。本次没有进行两服黑魔技能机制对比；离线测试通过不等同于游戏内实战验证。
+
 ## 自动发布
 
 推送 `v*` 标签，或在 GitHub Actions 中手动运行 `Build and Release` 并填写版本号，即可自动完成 API15 SDK 恢复、Release 构建、`Los.zip` 和 `repo.json` 生成、SHA-256 计算与 GitHub Release 发布：
@@ -74,7 +89,9 @@ git tag v1.0.0
 git push origin v1.0.0
 ```
 
-自动发布不会打包 PromeRotation、Dalamud 或 ECommons，仅包含运行所需的 `Los.dll` 与 `Los.deps.json`。
+自动发布不会打包 PromeRotation、Dalamud 或 ECommons；国服包包含 `Los.dll` 与 `Los.deps.json`，台服包包含 `Los.TC.dll` 与 `Los.TC.deps.json`。
+
+台服使用独立发布仓库 `Elio0825/Los_PR-TC`，由该仓库调用主源码仓库的可复用工作流，按明确的源码提交构建。台服发布使用自身仓库的 `GITHUB_TOKEN`，不需要共享个人令牌。详细步骤见 [台服适配与发布](docs/TC适配与发布.md)。
 
 生成 PR 下载中心所需的 `Los.zip` 和 `repo.json`：
 
@@ -93,6 +110,11 @@ bin\Release\net10.0-windows\Los.dll
 
 ## 安装
 
+在对应客户端的 PR 下载源中添加：
+
+- 国服：<https://github.com/Elio0825/Los_PR/releases/latest/download/repo.json>
+- 台服：<https://github.com/Elio0825/Los_PR-TC/releases/latest/download/repo.json>
+
 将 `Los.dll` 放入 PromeRotation 配置目录下的：
 
 ```text
@@ -107,10 +129,13 @@ ACR\Los\
 
 Debug 日志位于同一配置目录下的 `DebugLogs` 文件夹。
 
+台服安装目录为 `ACR\Los-TC\`，设置目录为 `Settings\ACRConfig\Los-TC\`。两服作者标识、程序集和更新源分别隔离。
+
 ## 项目结构
 
 ```text
 BLM/Core/          状态、技能与 Tracker
+BLM/Compatibility/ CN/TC 平台标识与必要接口兼容
 BLM/Resolvers/     单体、AOE、能力技和统一决策引擎
 BLM/Openers/       分级起手定义与执行器
 BLM/Timeline/      PR 时间轴动作和条件节点

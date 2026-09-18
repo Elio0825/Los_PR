@@ -1,0 +1,133 @@
+name: Build and release TC
+
+on:
+  workflow_call:
+    inputs:
+      version:
+        description: "Release version, e.g. 1.0.0"
+        required: true
+        type: string
+      source_commit:
+        description: "Full commit SHA in Elio0825/Los_PR to compile"
+        required: true
+        type: string
+
+permissions:
+  contents: write
+
+concurrency:
+  group: tc-release-${{ inputs.version }}
+  cancel-in-progress: false
+
+jobs:
+  release:
+    if: github.repository == 'Elio0825/Los_PR-TC'
+    runs-on: windows-latest
+    env:
+      RELEASE_VERSION: ${{ inputs.version }}
+      SOURCE_COMMIT: ${{ inputs.source_commit }}
+      RELEASE_REPOSITORY: ${{ github.repository }}
+      RELEASE_COMMIT: ${{ github.sha }}
+
+    steps:
+      - name: Validate release input
+        shell: pwsh
+        run: |
+          $version = $null
+          if (-not [Version]::TryParse($env:RELEASE_VERSION, [ref]$version)) {
+            throw "Release version must be a valid System.Version."
+          }
+          if ($env:SOURCE_COMMIT -notmatch '^[0-9a-fA-F]{40}$') {
+            throw "Source commit must be a full 40-character SHA in Elio0825/Los_PR."
+          }
+          if ($env:RELEASE_REPOSITORY -ne 'Elio0825/Los_PR-TC') {
+            throw "This workflow may publish only to Elio0825/Los_PR-TC."
+          }
+
+      - name: Checkout pinned source
+        uses: actions/checkout@v4
+        with:
+          repository: Elio0825/Los_PR
+          ref: ${{ inputs.source_commit }}
+          persist-credentials: false
+
+      - name: Verify source commit
+        shell: pwsh
+        run: |
+          $actualCommit = git rev-parse HEAD
+          if ($LASTEXITCODE -ne 0 -or $actualCommit -ne $env:SOURCE_COMMIT) {
+            throw "Checked out source does not match the requested commit."
+          }
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: |
+            9.0.x
+            10.0.x
+
+      - name: Build and verify TC package
+        shell: pwsh
+        env:
+          NUGET_PACKAGES: ${{ runner.temp }}\nuget-tc-packages
+        run: |
+          ./scripts/New-AcrRelease.ps1 `
+            -ClientRegion TC `
+            -Version $env:RELEASE_VERSION `
+            -SourceCommit $env:SOURCE_COMMIT `
+            -OutputDirectory "$env:RUNNER_TEMP\dist-tc" `
+            -SdkOfflineTests
+
+      - name: Upload verified package
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-tc-${{ inputs.version }}
+          if-no-files-found: error
+          path: |
+            ${{ runner.temp }}\dist-tc\Los.TC.zip
+            ${{ runner.temp }}\dist-tc\repo.json
+            ${{ runner.temp }}\dist-tc\build-info.json
+
+      - name: Publish to TC repository
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $distDir = Join-Path $env:RUNNER_TEMP 'dist-tc'
+          $buildInfo = Get-Content -LiteralPath (Join-Path $distDir 'build-info.json') -Raw | ConvertFrom-Json
+          if ($buildInfo.sourceDirty -or $buildInfo.sourceCommit -ne $env:SOURCE_COMMIT -or
+              -not $buildInfo.testsExecuted -or $buildInfo.testEnvironment -ne 'sdk-offline') {
+            throw "The TC package has unverified source or test provenance."
+          }
+          $tag = "v$env:RELEASE_VERSION"
+          $releasesJson = gh release list --repo $env:RELEASE_REPOSITORY --limit 1000 --json tagName
+          if ($LASTEXITCODE -ne 0) { throw "Could not inspect existing TC releases." }
+          if (@($releasesJson | ConvertFrom-Json).tagName -contains $tag) {
+            throw "TC release $tag already exists. Publish a new version instead of overwriting it."
+          }
+
+          $notes = @(
+            "LOS 台服版本（Dalamud API13 / .NET 9）。",
+            "",
+            "源码仓库：https://github.com/Elio0825/Los_PR",
+            "源码提交：https://github.com/Elio0825/Los_PR/commit/$env:SOURCE_COMMIT",
+            "编译 SDK：$($buildInfo.sdk)",
+            "PR 参考版本：$($buildInfo.referencePromeVersion)",
+            "",
+            "已完成台服编译、SDK 离线回归测试与发布包校验；实际战斗行为仍需台服验证。",
+            "",
+            "安装源：https://github.com/Elio0825/Los_PR-TC/releases/latest/download/repo.json"
+          ) -join [Environment]::NewLine
+          $notesPath = Join-Path $env:RUNNER_TEMP 'tc-release-notes.md'
+          [IO.File]::WriteAllText($notesPath, $notes, [Text.UTF8Encoding]::new($false))
+
+          gh release create $tag `
+            --repo $env:RELEASE_REPOSITORY `
+            --target $env:RELEASE_COMMIT `
+            --title "$tag（台服）" `
+            --notes-file $notesPath `
+            --latest `
+            (Join-Path $distDir 'Los.TC.zip') `
+            (Join-Path $distDir 'repo.json') `
+            (Join-Path $distDir 'build-info.json')
+          if ($LASTEXITCODE -ne 0) { throw "TC release publication failed." }
