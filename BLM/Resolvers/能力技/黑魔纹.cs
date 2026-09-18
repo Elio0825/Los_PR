@@ -21,6 +21,12 @@ internal static partial class Level100AbilityResolvers
             return BlmResolverCheckResult.Reject(-5);
         }
 
+        if (context.StationaryDurationMs
+            < input.Settings.StationaryLeyLinesSeconds * 1000d)
+        {
+            return BlmResolverCheckResult.Reject(-13);
+        }
+
         if (input.CasualCombat.IsCasualDutyNonBoss && ShouldHoldCasualBurst(input))
         {
             return BlmResolverCheckResult.Reject(-12);
@@ -32,7 +38,11 @@ internal static partial class Level100AbilityResolvers
         }
 
         var leyLines = Level100ResolverFacts.Action(input, BLMSkill.黑魔纹);
-        if (leyLines is not { IsUnlocked: true, CanCast: true })
+        // 与三连咏唱同理：PR 的 CanCast 在充能期间误报 false，
+        // 双充能技能以完整充能层数判定就绪。
+        if (leyLines is not { IsUnlocked: true }
+            || (!leyLines.CanCast
+                && !BlmDecisionPrimitives.HasReadyCharge(leyLines.Charges)))
         {
             return BlmResolverCheckResult.Reject(-3);
         }

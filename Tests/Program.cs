@@ -23,6 +23,7 @@ internal static class Program
             ("70–99级与100级核爆起手", MultiLevelOpenerTests.RunAll),
             ("PR 时间轴 QT/Hotkey/资源接入", TimelineIntegrationTests.RunAll),
             ("Hotkey 爆发药物品调用", HotkeyPotionTests.RunAll),
+            ("Hotkey 黑魔纹替换与手动意图", HotkeyActionReplacementTests.RunAll),
             ("QT/Hotkey 快捷键捕获与持久化", KeyBindingTests.RunAll),
             ("Los.dll 公共 API 边界", PublicApiTests.RunAll),
         };

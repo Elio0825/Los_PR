@@ -38,13 +38,16 @@ internal sealed class BlmResolverInputAdapter
     ];
 
     private readonly BlmResolverRuntimeMemory _runtimeMemory;
+    private readonly BlmMotionRuntimeMemory _motionMemory;
     private readonly Func<BlackMageSettings>? _settingsProvider;
 
     public BlmResolverInputAdapter(
         BlmResolverRuntimeMemory? runtimeMemory = null,
-        Func<BlackMageSettings>? settingsProvider = null)
+        Func<BlackMageSettings>? settingsProvider = null,
+        BlmMotionRuntimeMemory? motionMemory = null)
     {
         _runtimeMemory = runtimeMemory ?? new BlmResolverRuntimeMemory();
+        _motionMemory = motionMemory ?? new BlmMotionRuntimeMemory();
         _settingsProvider = settingsProvider;
     }
 
@@ -58,6 +61,15 @@ internal sealed class BlmResolverInputAdapter
         ArgumentNullException.ThrowIfNull(context);
         ArgumentNullException.ThrowIfNull(decision);
         var consoleSettings = ReadConsoleSettings();
+        var motion = _motionMemory.Advance(new BlmMotionRuntimeObservation(
+            decision.Snapshot.StateGeneration,
+            context.CapturedAtMs,
+            context.IsAvailable,
+            context.AcrState == AcrState.On,
+            context.InCombat,
+            context.IsAlive,
+            context.IsMoving,
+            ResolveLastGcdReadyAtMs(decision.PreviousGcd, context.GcdTotalSeconds)));
 
         if (context.Level < (consoleSettings?.MinimumEnabledLevel ?? 1))
         {
@@ -67,7 +79,8 @@ internal sealed class BlmResolverInputAdapter
                 _runtimeMemory.GetSnapshot(),
                 [],
                 highPriority,
-                consoleSettings: consoleSettings);
+                consoleSettings: consoleSettings,
+                motion: motion);
             reason = "BelowMinimumEnabledLevel";
             return false;
         }
@@ -80,7 +93,8 @@ internal sealed class BlmResolverInputAdapter
                 _runtimeMemory.GetSnapshot(),
                 [],
                 highPriority,
-                consoleSettings: consoleSettings);
+                consoleSettings: consoleSettings,
+                motion: motion);
             reason = "GenerationMismatch";
             return false;
         }
@@ -93,7 +107,8 @@ internal sealed class BlmResolverInputAdapter
                 BlmResolverRuntimeState.Empty,
                 [],
                 highPriority,
-                consoleSettings: consoleSettings);
+                consoleSettings: consoleSettings,
+                motion: motion);
             return false;
         }
 
@@ -116,7 +131,8 @@ internal sealed class BlmResolverInputAdapter
             actions,
             highPriority,
             ResolveProductionActionChannel,
-            consoleSettings);
+            consoleSettings,
+            motion);
         var hasAvailableInstantGcd =
             Level100ResolverEngine.HasAvailableInstantGcd(preliminaryInput);
         var runtime = _runtimeMemory.Advance(new BlmResolverRuntimeObservation(
@@ -140,7 +156,8 @@ internal sealed class BlmResolverInputAdapter
             actions,
             highPriority,
             ResolveProductionActionChannel,
-            consoleSettings);
+            consoleSettings,
+            motion);
         reason = input.FactCoverage.UnsupportedSummary;
         return true;
     }
@@ -152,7 +169,8 @@ internal sealed class BlmResolverInputAdapter
         ImmutableArray<BlmResolverActionFact> actions,
         bool highPriority,
         Func<uint, BlmResolverChannel?>? resolveActionChannel = null,
-        BlackMageSettings? consoleSettings = null)
+        BlackMageSettings? consoleSettings = null,
+        BlmMotionRuntimeState? motion = null)
     {
         ArgumentNullException.ThrowIfNull(context);
         ArgumentNullException.ThrowIfNull(decision);
@@ -174,6 +192,10 @@ internal sealed class BlmResolverInputAdapter
             MoveTriplecastEnabled = context.MoveTriplecastEnabled,
             AmplifierEnabled = context.AmplifierEnabled,
             LeyLinesEnabled = context.LeyLinesEnabled,
+            MoveTriplecastSeconds = consoleSettings?.MoveTriplecastSeconds
+                ?? BlmResolverSettings.Default.MoveTriplecastSeconds,
+            StationaryLeyLinesSeconds = consoleSettings?.StationaryLeyLinesSeconds
+                ?? BlmResolverSettings.Default.StationaryLeyLinesSeconds,
             CompressFireParadox = consoleSettings?.CompressFireParadoxEnabled
                 ?? context.CompressFireParadox,
             DotHpThresholdPercent = consoleSettings?.DotHpThresholdPercent
@@ -193,6 +215,15 @@ internal sealed class BlmResolverInputAdapter
             IsAlive = context.IsAlive,
             CanAct = context.CanAct,
             IsMoving = context.IsMoving,
+            MovingDurationMs = generationsMatch && motion?.StateGeneration == snapshot.StateGeneration
+                ? motion.MovingDurationMs
+                : 0d,
+            StationaryDurationMs = generationsMatch && motion?.StateGeneration == snapshot.StateGeneration
+                ? motion.StationaryDurationMs
+                : 0d,
+            GcdStarvationMs = generationsMatch && motion?.StateGeneration == snapshot.StateGeneration
+                ? motion.GcdStarvationMs
+                : 0d,
             IsCasting = context.IsCasting,
             IsSingleTargetMode = !context.IsAoeMode,
             EnemyCount = context.EnemyCount,
@@ -406,6 +437,18 @@ internal sealed class BlmResolverInputAdapter
             return UnavailableAction(requestedActionId);
         }
     }
+
+    // 瞬发 GCD 的冷却从成功那一刻才开始转，空转基准要加算 GCD 总长；
+    // 读条 GCD 的冷却在读条期间已转完大部分，基准直接用成功时刻。
+    internal static long ResolveLastGcdReadyAtMs(
+        BlmActionSuccess? previousGcd,
+        float gcdTotalSeconds)
+        => previousGcd is not { } gcd
+            ? 0
+            : gcd.OccurredAtMs + (gcd.WasInstant
+                ? (long)Math.Round(
+                    gcdTotalSeconds > 0f ? gcdTotalSeconds * 1000d : 2500d)
+                : 0);
 
     private static BlmResolverActionFact UnavailableAction(uint actionId)
         => new()

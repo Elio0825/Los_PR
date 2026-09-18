@@ -39,6 +39,14 @@ internal sealed record BlmDebugResolverSnapshot
     public bool HighPriorityQueueActive { get; init; }
     public int RemainingWeaves { get; init; }
     public string FactCoverage { get; init; } = string.Empty;
+    public double GcdStarvationMs { get; init; }
+    public double MovingDurationMs { get; init; }
+    public double StationaryDurationMs { get; init; }
+    public bool HasAvailableInstantGcd { get; init; }
+    public float MoveTriplecastSeconds { get; init; }
+    public float TriplecastCharges { get; init; }
+    public double TriplecastCooldownRemainMs { get; init; }
+    public bool TriplecastCanCast { get; init; }
 }
 
 internal sealed record BlmDebugResolverDraft
@@ -61,6 +69,14 @@ internal sealed record BlmDebugResolverDraft
     public bool HighPriorityQueueActive { get; init; }
     public int RemainingWeaves { get; init; }
     public string FactCoverage { get; init; } = string.Empty;
+    public double GcdStarvationMs { get; init; }
+    public double MovingDurationMs { get; init; }
+    public double StationaryDurationMs { get; init; }
+    public bool HasAvailableInstantGcd { get; init; }
+    public float MoveTriplecastSeconds { get; init; }
+    public float TriplecastCharges { get; init; }
+    public double TriplecastCooldownRemainMs { get; init; }
+    public bool TriplecastCanCast { get; init; }
 }
 
 internal sealed record BlmDebugResourceSnapshot

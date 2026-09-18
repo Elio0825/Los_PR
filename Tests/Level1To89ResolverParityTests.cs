@@ -357,6 +357,10 @@ internal static class Level1To89ResolverParityTests
         var level90LeyLines = SetAction(
             BaseInput(90) with
             {
+                Context = BaseInput(90).Context with
+                {
+                    StationaryDurationMs = 3_000,
+                },
                 Settings = BaseInput(90).Settings with { LeyLinesEnabled = true },
             },
             BLMSkill.黑魔纹,
@@ -367,6 +371,12 @@ internal static class Level1To89ResolverParityTests
             "Ability.黑魔纹",
             28,
             "90级黑魔纹兼容");
+        AssertEx.True(
+            Level100ResolverEngine.Evaluate(level90LeyLines with
+            {
+                Context = level90LeyLines.Context with { StationaryDurationMs = 2_999 },
+            }).OffGcdCandidate is null,
+            "黑魔纹未达到原地秒数阈值时不得释放");
 
         var lockedLucid = SetAction(
             BaseInput(100) with

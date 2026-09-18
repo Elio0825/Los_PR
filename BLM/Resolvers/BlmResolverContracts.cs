@@ -72,6 +72,8 @@ internal sealed record BlmResolverSettings
     public bool MoveTriplecastEnabled { get; init; } = true;
     public bool AmplifierEnabled { get; init; } = true;
     public bool LeyLinesEnabled { get; init; } = true;
+    public float MoveTriplecastSeconds { get; init; } = 1.5f;
+    public float StationaryLeyLinesSeconds { get; init; } = 3f;
     public bool AutoMitigationEnabled { get; init; } = true;
     public bool PotionEnabled { get; init; }
     public bool CompressFireParadox { get; init; } = true;
@@ -93,6 +95,9 @@ internal sealed record BlmResolverContextFacts
     public bool IsAlive { get; init; }
     public bool CanAct { get; init; }
     public bool IsMoving { get; init; }
+    public double MovingDurationMs { get; init; }
+    public double StationaryDurationMs { get; init; }
+    public double GcdStarvationMs { get; init; }
     public bool IsCasting { get; init; }
     public bool IsSingleTargetMode { get; init; }
     public int EnemyCount { get; init; }

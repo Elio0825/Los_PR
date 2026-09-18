@@ -4,6 +4,7 @@ using LosPr.BLM.Resolvers;
 using LosPr.BLM.Resolvers.Level100;
 using LosPr.BLM.Resolvers.Production;
 using PromeRotation.Data;
+using PromeRotation.Managers;
 
 namespace Los.Tests;
 
@@ -16,6 +17,7 @@ internal static class ResolverExecutionTests
         FireEndHoldPrioritizesTranspose();
         ManafontIsDeliveredAsOffGcd();
         OffGcdWaitsForActualWeaveWindow();
+        MovementTriplecastQueueAtGcdBoundary();
         ManafontBridgeDeliversAfterHardcast();
         TargetSwitchCancelsOldPending();
         TargetSwitchPreservesSelfAbilityPending();
@@ -248,6 +250,199 @@ internal static class ResolverExecutionTests
         AssertEx.False(
             fixture.Tracker.GetTrackerSnapshot().HasPendingIssuedAction,
             "尚未进入真实 weave 窗口时不得提前注册 Pending");
+    }
+
+    private static void MovementTriplecastQueueAtGcdBoundary()
+    {
+        ActionQueueManager.ClearAllQueues();
+        try
+        {
+            var movingContext = TestContext.Base() with
+            {
+                Phase = BlmPhase.Fire,
+                AfStacks = 3,
+                HasParadox = false,
+                HasFirestarter = false,
+                HasThunderhead = false,
+                PolyglotStacks = 0,
+                IsMoving = true,
+                IsCasting = false,
+                AnimationLockSeconds = 0f,
+                GcdRemainSeconds = 0f,
+            };
+            PAction? queuedMovementTriplecast = null;
+            var fixture = CreateFixture(
+                movingContext,
+                action => queuedMovementTriplecast = action);
+            var previous = Success(
+                fixture.Context.Tracker.StateGeneration,
+                BLMSkill.绝望,
+                wasInstant: true);
+            var input = Input(
+                fixture.Context,
+                BlmResolverSettings.Default with
+                {
+                    MoveTriplecastEnabled = true,
+                    DotEnabled = false,
+                    MoveXenoglossyEnabled = true,
+                    ManafontEnabled = false,
+                    AmplifierEnabled = false,
+                    LeyLinesEnabled = false,
+                },
+                [Ready(BLMSkill.三连咏唱)],
+                previous) with
+            {
+                Context = Input(
+                    fixture.Context,
+                    BlmResolverSettings.Default,
+                    [Ready(BLMSkill.三连咏唱)],
+                    previous).Context with
+                {
+                    GcdStarvationMs = 2_000,
+                },
+            };
+
+            AssertEx.True(
+                fixture.Execution.BeginFrame(fixture.Context, input),
+                "GCD=0 移动三连帧应建立");
+            AssertEx.Equal(
+                BLMSkill.三连咏唱,
+                fixture.Execution.GetSnapshot()!.Decision.OffGcdCandidate!.ActionId,
+                "无瞬发 GCD 且达到阈值时应选择移动三连");
+            AssertEx.True(fixture.Context.IsMoving, "移动三连测试上下文必须处于移动");
+            AssertEx.False(fixture.Context.IsCasting, "移动三连测试上下文不得读条");
+            AssertEx.False(
+                fixture.Execution.GetSnapshot()!.Decision.DeliveryBlocked,
+                $"移动三连测试帧不得被全局阻断: {fixture.Execution.GetSnapshot()!.Decision.BlockReason}");
+            AssertEx.Equal(
+                "Ability.三连咏唱",
+                fixture.Execution.GetSnapshot()!.Decision.OffGcdCandidate!.ResolverId,
+                "移动三连测试候选规则错误");
+            AssertEx.Equal(
+                50,
+                fixture.Execution.GetSnapshot()!.Decision.OffGcdCandidate!.CheckCode,
+                "移动三连测试候选放行码错误");
+            AssertEx.Equal(0f, fixture.Context.GcdRemainSeconds, "移动三连测试 GCD 必须结束");
+            AssertEx.Equal(0f, fixture.Context.AnimationLockSeconds, "移动三连测试动画锁必须结束");
+            AssertEx.False(
+                fixture.Execution.GetSnapshot()!.Input.HighPriorityQueueActive,
+                "移动三连测试帧不得带高优队列标记");
+            AssertEx.False(
+                ActionQueueManager.HasHighPriorityAction(),
+                "移动三连测试前高优队列必须为空");
+            AssertEx.False(
+                ActionQueueManager.HasActionsInAlwaysQueue(),
+                "移动三连测试前 Always 队列必须为空");
+            AssertEx.True(
+                fixture.Execution.TryQueueMovementTriplecast(fixture.Context),
+                $"GCD=0 移动三连应加入 Always 队列 (callback={queuedMovementTriplecast is not null})");
+            AssertEx.Equal(
+                BLMSkill.三连咏唱,
+                queuedMovementTriplecast!.ActionId,
+                "移动三连入队动作错误");
+            AssertEx.True(
+                fixture.Execution.Resolve(BlmResolverChannel.OffGcd, fixture.Context)
+                    is null,
+                "移动三连入队后 OffGCD 不得再次返回同一技能");
+            AssertEx.False(
+                fixture.Execution.TryQueueMovementTriplecast(fixture.Context),
+                "同一生产帧不得重复入队移动三连");
+            AssertEx.False(
+                fixture.Execution.TryQueueMovementTriplecast(
+                    fixture.Context with { TriplecastStacks = 1 }),
+                "三连 buff 已上身时不得再次入队移动三连");
+
+            var activeCastContext = movingContext with
+            {
+                CapturedAtMs = movingContext.CapturedAtMs + 1000,
+                GcdRemainSeconds = 1.5f,
+                IsCasting = true,
+                AnimationLockSeconds = 0.25f,
+            };
+            PAction? activeQueuedAction = null;
+            var activeFixture = CreateFixture(
+                activeCastContext,
+                action => activeQueuedAction = action);
+            var activeInput = Input(
+                activeFixture.Context,
+                BlmResolverSettings.Default with
+                {
+                    MoveTriplecastEnabled = true,
+                    DotEnabled = false,
+                    MoveXenoglossyEnabled = true,
+                    ManafontEnabled = false,
+                    AmplifierEnabled = false,
+                    LeyLinesEnabled = false,
+                },
+                [Ready(BLMSkill.三连咏唱)],
+                previous) with
+            {
+                Context = Input(
+                    activeFixture.Context,
+                    BlmResolverSettings.Default,
+                    [Ready(BLMSkill.三连咏唱)],
+                    previous).Context with
+                {
+                    GcdStarvationMs = 2_000,
+                },
+            };
+            AssertEx.True(
+                activeFixture.Execution.BeginFrame(activeFixture.Context, activeInput),
+                "读条中的移动三连帧应建立");
+            AssertEx.Equal(
+                BLMSkill.三连咏唱,
+                activeFixture.Execution.GetSnapshot()!.Decision.OffGcdCandidate!.ActionId,
+                "读条中的移动三连仍应保留候选");
+            AssertEx.True(
+                activeFixture.Execution.TryQueueMovementTriplecast(activeFixture.Context),
+                "读条/GCD 未结束时达到阈值也应立即加入移动三连队列");
+            AssertEx.Equal(
+                BLMSkill.三连咏唱,
+                activeQueuedAction!.ActionId,
+                "读条中的移动三连入队动作错误");
+
+            foreach (var instantContext in new[]
+            {
+                movingContext with { HasParadox = true },
+                movingContext with { PolyglotStacks = 1 },
+            })
+            {
+                var instantInput = Input(
+                    instantContext,
+                    BlmResolverSettings.Default with
+                    {
+                        MoveTriplecastEnabled = true,
+                        DotEnabled = false,
+                        ManafontEnabled = false,
+                        AmplifierEnabled = false,
+                        LeyLinesEnabled = false,
+                    },
+                    [Ready(BLMSkill.三连咏唱)],
+                    previous) with
+                {
+                    Context = Input(
+                        instantContext,
+                        BlmResolverSettings.Default,
+                        [Ready(BLMSkill.三连咏唱)],
+                        previous).Context with
+                    {
+                        GcdStarvationMs = 2_000,
+                    },
+                };
+                var instantFrame = Level100ResolverEngine.Evaluate(instantInput);
+                AssertEx.True(
+                    instantFrame.GcdCandidate is { ActionId: BLMSkill.悖论 }
+                        or { ActionId: BLMSkill.异言 },
+                    "悖论/异言可用时应由移动瞬发 GCD 优先");
+                AssertEx.True(
+                    instantFrame.OffGcdCandidate?.ActionId != BLMSkill.三连咏唱,
+                    "悖论/异言可用时移动三连不得抢占");
+            }
+        }
+        finally
+        {
+            ActionQueueManager.ClearAllQueues();
+        }
     }
 
     private static void ManafontBridgeDeliversAfterHardcast()
@@ -1275,7 +1470,9 @@ internal static class ResolverExecutionTests
             $"{scenario}竞争时Manafont Always只能交付一次");
     }
 
-    private static Fixture CreateFixture(BlmContext context)
+    private static Fixture CreateFixture(
+        BlmContext context,
+        Action<PAction>? movementTriplecastEnqueuer = null)
     {
         var clock = new FakeClock(context.CapturedAtMs);
         var tracker = new BlmStateTracker(context, clock, new MappingActionIdNormalizer());
@@ -1283,7 +1480,9 @@ internal static class ResolverExecutionTests
         return new Fixture(
             clock,
             tracker,
-            new BlmResolverExecutionService(tracker),
+            new BlmResolverExecutionService(
+                tracker,
+                movementTriplecastEnqueuer: movementTriplecastEnqueuer),
             captured);
     }
 

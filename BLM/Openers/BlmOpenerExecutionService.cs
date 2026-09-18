@@ -171,6 +171,12 @@ internal sealed class BlmOpenerExecutionService
                 || context.InCombat
                 || !BlmAdditionalOpenerDefinitions.SupportsLevel(variant, context.Level))
             {
+                PublishCountdownArmRejectedNoLock(
+                    context,
+                    variant,
+                    policy,
+                    potionId,
+                    plan: null);
                 return false;
             }
 
@@ -180,8 +186,18 @@ internal sealed class BlmOpenerExecutionService
                 context.DotEnabled,
                 policy.HighEndPotionEnabled ? potionId : 0,
                 policy.NoTriplecast);
-            if (!CanStart(context, plan))
+            var canStart = CanStart(context, plan);
+            var canStartWithDeferredTarget = !canStart
+                && context.TargetEntityId == 0
+                && CanStart(context, plan, allowUnboundTarget: true);
+            if (!canStart && !canStartWithDeferredTarget)
             {
+                PublishCountdownArmRejectedNoLock(
+                    context,
+                    variant,
+                    policy,
+                    potionId,
+                    plan);
                 return false;
             }
 
@@ -189,7 +205,9 @@ internal sealed class BlmOpenerExecutionService
                 plan,
                 context,
                 BlmOpenerStatus.Armed,
-                $"检测到倒计时，已武装{plan.DisplayName}");
+                canStartWithDeferredTarget
+                    ? $"检测到倒计时，已武装{plan.DisplayName}，等待绑定目标"
+                    : $"检测到倒计时，已武装{plan.DisplayName}");
             ArmExternalFire3NoLock();
             PublishNoLock(
                 context,
@@ -257,9 +275,21 @@ internal sealed class BlmOpenerExecutionService
                 || !IsVariantEnabled(SafeReadPolicy(), _plan.Variant)
                 || !context.HasValidTarget
                 || !context.InRange
-                || context.TargetEntityId != _targetEntityId)
+                || context.TargetEntityId == 0
+                || (_targetEntityId != 0 && context.TargetEntityId != _targetEntityId))
             {
                 return null;
+            }
+
+            if (_targetEntityId == 0)
+            {
+                _targetEntityId = context.TargetEntityId;
+                PublishNoLock(
+                    context,
+                    BlmDebugEventKind.Lifecycle,
+                    "Opener.TargetBound",
+                    context.TargetEntityId,
+                    "倒计时预读前已绑定当前有效目标");
             }
 
             return BlmCountdownOpenerBase.CreateFireThreePrecastAction(context);
@@ -650,10 +680,15 @@ internal sealed class BlmOpenerExecutionService
             return false;
         }
 
-        if (!context.HasValidTarget
-            || !context.InRange
-            || context.TargetEntityId == 0
-            || context.TargetEntityId != _targetEntityId)
+        var deferredTargetBinding = _plan?.Mode == BlmOpenerMode.HighEndCountdown
+            && !_combatRebased
+            && !context.InCombat
+            && _targetEntityId == 0;
+        if (!deferredTargetBinding
+            && (!context.HasValidTarget
+                || !context.InRange
+                || context.TargetEntityId == 0
+                || context.TargetEntityId != _targetEntityId))
         {
             CancelNoLock(context, "起手目标失效、越界或发生切换");
             return false;
@@ -1221,23 +1256,150 @@ internal sealed class BlmOpenerExecutionService
             && _pendingHardcastObserved
             && _pendingHardcastLastRemainSeconds > 0.15f;
 
-    private static bool CanStart(BlmContext context, BlmOpenerPlan plan)
-        => context.IsAvailable
-            && context.AcrState == AcrState.On
-            && context.Level >= plan.MinimumLevel
-            && context.Level <= plan.MaximumLevel
-            && context.IsAlive
-            && context.CanAct
-            && !context.IsCasting
-            && !context.IsMoving
-            && !context.IsAoeMode
-            && context.HasValidTarget
-            && context.InRange
-            && context.TargetEntityId != 0
-            && context.Phase == BlmPhase.Neutral
-            && context.IsMpFull
-            && plan.Steps.All(step => IsStepUnlockedAtLevel(step, context.Level))
-            && plan.Steps.All(step => IsRequiredAbilityReady(step, context));
+    private static bool CanStart(
+        BlmContext context,
+        BlmOpenerPlan plan,
+        bool allowUnboundTarget = false)
+        => GetStartBlockReasons(context, plan, allowUnboundTarget).Count == 0;
+
+    private static List<string> GetStartBlockReasons(
+        BlmContext context,
+        BlmOpenerPlan plan,
+        bool allowUnboundTarget = false)
+    {
+        var reasons = new List<string>();
+        if (!context.IsAvailable)
+        {
+            reasons.Add($"游戏状态不可用({context.AvailabilityText})");
+        }
+
+        if (context.AcrState != AcrState.On)
+        {
+            reasons.Add($"ACR 未启用({context.AcrState})");
+        }
+
+        if (context.Level < plan.MinimumLevel || context.Level > plan.MaximumLevel)
+        {
+            reasons.Add($"等级不在范围内({context.Level}, 需要 {plan.MinimumLevel}-{plan.MaximumLevel})");
+        }
+
+        if (!context.IsAlive)
+        {
+            reasons.Add("角色不存活");
+        }
+
+        if (!context.CanAct)
+        {
+            reasons.Add("角色当前不可行动");
+        }
+
+        if (context.IsCasting)
+        {
+            reasons.Add($"正在读条(ActionId={context.CurrentCastingActionId})");
+        }
+
+        if (context.IsMoving)
+        {
+            reasons.Add("角色正在移动");
+        }
+
+        if (context.IsAoeMode)
+        {
+            reasons.Add("当前为 AOE 模式");
+        }
+
+        var deferTargetBinding = allowUnboundTarget && context.TargetEntityId == 0;
+        if (!deferTargetBinding && !context.HasValidTarget)
+        {
+            reasons.Add("没有有效目标");
+        }
+
+        if (!deferTargetBinding && !context.InRange)
+        {
+            reasons.Add($"目标超出范围(距离={context.TargetDistance:F2})");
+        }
+
+        if (!deferTargetBinding && context.TargetEntityId == 0)
+        {
+            reasons.Add("目标实体 ID 为 0");
+        }
+
+        if (context.Phase != BlmPhase.Neutral)
+        {
+            reasons.Add($"当前元素阶段不是 Neutral({context.Phase})");
+        }
+
+        if (!context.IsMpFull)
+        {
+            reasons.Add($"MP 未满({context.Mp}/{context.MaxMp})");
+        }
+
+        foreach (var step in plan.Steps)
+        {
+            if (!IsStepUnlockedAtLevel(step, context.Level))
+            {
+                reasons.Add($"起手技能未解锁({step.Id}, ActionId={step.ActionId})");
+            }
+
+            if (!IsRequiredAbilityReady(step, context))
+            {
+                reasons.Add($"起手能力技未就绪({step.Id}, ActionId={step.ActionId})");
+            }
+        }
+
+        return reasons;
+    }
+
+    private void PublishCountdownArmRejectedNoLock(
+        BlmContext context,
+        BlmOpenerVariant variant,
+        BlmOpenerPolicy policy,
+        uint potionId,
+        BlmOpenerPlan? plan)
+    {
+        var reasons = new List<string>();
+        if (!policy.HighEndCountdownEnabled)
+        {
+            reasons.Add("高难倒计时起手开关关闭");
+        }
+
+        if (!IsVariantEnabled(policy, variant))
+        {
+            reasons.Add($"当前起手变体未启用({variant})");
+        }
+
+        if (context.InCombat)
+        {
+            reasons.Add("已在战斗中");
+        }
+
+        if (!BlmAdditionalOpenerDefinitions.SupportsLevel(variant, context.Level))
+        {
+            reasons.Add($"当前等级不支持起手变体({variant}, Level={context.Level})");
+        }
+
+        if (plan is not null)
+        {
+            reasons.AddRange(GetStartBlockReasons(context, plan));
+        }
+
+        if (reasons.Count == 0)
+        {
+            reasons.Add("未匹配到具体拒绝条件，请检查倒计时回调和上下文快照");
+        }
+
+        PublishNoLock(
+            context,
+            BlmDebugEventKind.Lifecycle,
+            "Opener.Arm.Rejected",
+            0,
+            $"倒计时起手未武装：{string.Join("；", reasons)}",
+            detail: $"Variant={variant}; InCombat={context.InCombat}; "
+                + $"Level={context.Level}; Target={context.TargetEntityId}; "
+                + $"TargetDistance={context.TargetDistance:F2}; "
+                + $"Mp={context.Mp}/{context.MaxMp}; Phase={context.Phase}; "
+                + $"AcrState={context.AcrState}; PotionId={potionId}");
+    }
 
     private static bool IsStepUnlockedAtLevel(BlmOpenerStep step, int level)
         => step.Kind == BlmOpenerStepKind.Item

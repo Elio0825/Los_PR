@@ -34,19 +34,25 @@ internal sealed class BlmResolverExecutionService
     private readonly object _gate = new();
     private readonly BlmStateTracker _tracker;
     private readonly IBlmDebugSink _debug;
+    private readonly Action<PAction> _movementTriplecastEnqueuer;
     private readonly HashSet<BlmResolverChannel> _deliveredChannels = [];
 
     private BlmResolverProductionFrame? _latest;
     private long _nextFrameSequence;
     private string _lastFrameFingerprint = string.Empty;
     private long _lastFramePublishedAtMs;
+    private long _movementTriplecastQueuedAtMs;
+    private long _movementTriplecastQueuedStateGeneration;
 
     public BlmResolverExecutionService(
         BlmStateTracker tracker,
-        IBlmDebugSink? debugSink = null)
+        IBlmDebugSink? debugSink = null,
+        Action<PAction>? movementTriplecastEnqueuer = null)
     {
         _tracker = tracker ?? throw new ArgumentNullException(nameof(tracker));
         _debug = debugSink ?? NullBlmDebugSink.Instance;
+        _movementTriplecastEnqueuer = movementTriplecastEnqueuer
+            ?? (action => ActionQueueManager.Enqueue(action));
     }
 
     public BlmResolverProductionFrame? GetSnapshot()
@@ -63,6 +69,8 @@ internal sealed class BlmResolverExecutionService
         {
             _latest = null;
             _deliveredChannels.Clear();
+            _movementTriplecastQueuedAtMs = 0;
+            _movementTriplecastQueuedStateGeneration = 0;
             ResetPublicationStateNoLock();
         }
     }
@@ -75,6 +83,14 @@ internal sealed class BlmResolverExecutionService
         List<BlmDebugEventDraft>? drafts = null;
         lock (_gate)
         {
+            if (_movementTriplecastQueuedAtMs > 0
+                && _movementTriplecastQueuedStateGeneration
+                    != context.Tracker.StateGeneration)
+            {
+                _movementTriplecastQueuedAtMs = 0;
+                _movementTriplecastQueuedStateGeneration = 0;
+            }
+
             var primaryTargetChanged = _latest is { } previous
                 && (previous.TargetEntityId != context.TargetEntityId
                     || previous.HasTarget != context.HasTarget
@@ -150,6 +166,99 @@ internal sealed class BlmResolverExecutionService
         return true;
     }
 
+    public bool TryQueueMovementTriplecast(BlmContext context)
+    {
+        ArgumentNullException.ThrowIfNull(context);
+
+        BlmDebugEventDraft? queuedDraft = null;
+        lock (_gate)
+        {
+            var frame = _latest;
+            if (frame is null
+                || !MatchesFrame(frame, context)
+                || frame.Input.HighPriorityQueueActive
+                || !context.IsMoving
+                || context.TriplecastStacks > 0
+                || frame.Decision.DeliveryBlocked
+                || frame.Decision.OffGcdCandidate is not
+                {
+                    ActionId: BLMSkill.三连咏唱,
+                    ResolverId: "Ability.三连咏唱",
+                    CheckCode: 50,
+                })
+            {
+                return false;
+            }
+
+            // 入队到实际交付之间存在在途窗口：三连 buff 要等执行器交付后才出现，
+            // 此窗口内用短标记防止每 Tick 重复入队。buff 出现后由上面的
+            // TriplecastStacks 检查接管；标记超时只意味着命令被静默丢弃，允许重试。
+            if (_movementTriplecastQueuedAtMs > 0)
+            {
+                if (_movementTriplecastQueuedStateGeneration
+                        == context.Tracker.StateGeneration
+                    && context.CapturedAtMs - _movementTriplecastQueuedAtMs
+                        < 3000)
+                {
+                    return false;
+                }
+
+                _movementTriplecastQueuedAtMs = 0;
+                _movementTriplecastQueuedStateGeneration = 0;
+            }
+
+            if (ActionQueueManager.HasHighPriorityAction()
+                || ActionQueueManager.HasActionsInAlwaysQueue())
+            {
+                return false;
+            }
+
+            var action = new PAction(
+                BLMSkill.三连咏唱,
+                ActionType.Always,
+                ActionTargetType.Self);
+            try
+            {
+                _movementTriplecastEnqueuer(action);
+            }
+            catch
+            {
+                return false;
+            }
+
+            _movementTriplecastQueuedAtMs = context.CapturedAtMs;
+            _movementTriplecastQueuedStateGeneration = context.Tracker.StateGeneration;
+            queuedDraft = new BlmDebugEventDraft
+            {
+                Kind = BlmDebugEventKind.DispatchReturned,
+                Context = context,
+                MonotonicMs = context.CapturedAtMs,
+                EntryPoint = "Resolver.Queue",
+                ActionId = action.ActionId,
+                NormalizedActionId = action.ActionId,
+                PActionType = action.Type.ToString(),
+                RuleId = "Ability.三连咏唱",
+                Reason = "移动三连已加入队列",
+                Detail = "没有可用瞬发且 GCD 空转已达阈值，已立即加入普通 Always 队列；当前读条、动画锁或 GCD 结束后交付。",
+                TargetEntityId = context.PlayerEntityId,
+            };
+        }
+
+        if (queuedDraft is not null)
+        {
+            try
+            {
+                _debug.Publish(queuedDraft);
+            }
+            catch
+            {
+                // Diagnostics must never alter action delivery.
+            }
+        }
+
+        return true;
+    }
+
     public PAction? Resolve(
         BlmResolverChannel channel,
         BlmContext context,
@@ -168,6 +277,14 @@ internal sealed class BlmResolverExecutionService
                 || highPriorityQueueActive
                 || frame.Input.HighPriorityQueueActive
                 || frame.Decision.DeliveryBlocked)
+            {
+                return null;
+            }
+
+            // 移动三连已经放入 Always 队列时，不能再从普通 OffGCD 入口返回
+            // 同一个候选；否则 RotationManager 可能在队列命令尚未消费前重复提交。
+            if (channel == BlmResolverChannel.OffGcd
+                && HasQueuedMovementTriplecastNoLock(frame, context))
             {
                 return null;
             }
@@ -261,6 +378,39 @@ internal sealed class BlmResolverExecutionService
             context.GcdRemainSeconds,
             context.AnimationLockSeconds);
 
+    private bool HasQueuedMovementTriplecastNoLock(
+        BlmResolverProductionFrame frame,
+        BlmContext context)
+    {
+        if (_movementTriplecastQueuedAtMs <= 0
+            || _movementTriplecastQueuedStateGeneration
+                != context.Tracker.StateGeneration)
+        {
+            return false;
+        }
+
+        if (frame.Decision.OffGcdCandidate is not
+            {
+                ActionId: BLMSkill.三连咏唱,
+                ResolverId: "Ability.三连咏唱",
+                CheckCode: 50,
+            })
+        {
+            return false;
+        }
+
+        // 队列命令只在在途窗口内视为占用，避免执行器异常丢弃后永久压制
+        // 普通 OffGCD；交付后三连 buff 会让 Resolver 停止产生该候选。
+        if (context.CapturedAtMs - _movementTriplecastQueuedAtMs >= 3000)
+        {
+            _movementTriplecastQueuedAtMs = 0;
+            _movementTriplecastQueuedStateGeneration = 0;
+            return false;
+        }
+
+        return true;
+    }
+
     private static long AckTimeoutFor(uint actionId, bool isGcd, bool wasInstant)
     {
         if (!isGcd)
@@ -341,6 +491,9 @@ internal sealed class BlmResolverExecutionService
         BlmContext context,
         string reason)
     {
+        var inputContext = frame.Input.Context;
+        var triplecast = Level100ResolverFacts.Action(frame.Input, BLMSkill.三连咏唱);
+        var hasAvailableInstantGcd = Level100ResolverEngine.HasAvailableInstantGcd(frame.Input);
         var drafts = new List<BlmDebugEventDraft>(3);
         foreach (var channel in Enum.GetValues<BlmResolverChannel>())
         {
@@ -381,6 +534,14 @@ internal sealed class BlmResolverExecutionService
                     HighPriorityQueueActive = frame.Input.HighPriorityQueueActive,
                     RemainingWeaves = frame.Decision.RemainingWeaves,
                     FactCoverage = frame.Input.FactCoverage.UnsupportedSummary,
+                    GcdStarvationMs = inputContext.GcdStarvationMs,
+                    MovingDurationMs = inputContext.MovingDurationMs,
+                    StationaryDurationMs = inputContext.StationaryDurationMs,
+                    HasAvailableInstantGcd = hasAvailableInstantGcd,
+                    MoveTriplecastSeconds = frame.Input.Settings.MoveTriplecastSeconds,
+                    TriplecastCharges = triplecast?.Charges ?? 0f,
+                    TriplecastCooldownRemainMs = triplecast?.CooldownRemainMs ?? 0d,
+                    TriplecastCanCast = triplecast?.CanCast ?? false,
                 },
             });
         }

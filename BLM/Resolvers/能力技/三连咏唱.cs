@@ -16,10 +16,14 @@ internal static partial class Level100AbilityResolvers
             return BlmResolverCheckResult.Reject(-80);
         }
 
+        // PR 的 CanCast 在多充能技能的充能期间恒为 false（即使握有完整一层），
+        // 因此对三连咏唱用完整充能层数替代 CanCast 判定就绪。
         if (triplecast.Charges < 1f
             || !Level100ResolverFacts.IsReadyWithCanCast(
                 input,
-                BLMSkill.三连咏唱))
+                BLMSkill.三连咏唱,
+                canCastOverride: triplecast.CanCast
+                    || BlmDecisionPrimitives.HasReadyCharge(triplecast.Charges)))
         {
             return BlmResolverCheckResult.Reject(-1);
         }
@@ -37,9 +41,10 @@ internal static partial class Level100AbilityResolvers
 
         if (input.Settings.MoveTriplecastEnabled
             && context.IsMoving
-            && !context.HasInstantCast
-            && !context.IsCasting
-            && ResolverAllowedWeaves(input) > 0)
+            && context.GcdStarvationMs
+                >= input.Settings.MoveTriplecastSeconds * 1000d
+            && !Level100ResolverEngine.HasAvailableInstantGcd(input)
+            && !context.HasInstantCast)
         {
             return Self(input, BLMSkill.三连咏唱, 50);
         }

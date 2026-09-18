@@ -16,6 +16,9 @@ internal static class Phase3FactAdapterTests
         ManafontProjectsPostRestoreFire4Count();
         UsedWeavesAreDerivedAfterPreviousGcd();
         RuntimeMemoryUsesPreviousGcdAndResets();
+        MotionRuntimeTracksThresholdsAndResets();
+        GcdStarvationSurvivesCastInterruption();
+        InstantGcdPushesStarveBaseToGcdReady();
         AvailableInstantGcdControlsForcedRecovery();
         AcrOffDoesNotAccumulateIdle();
         EntitySnapshotValidationFailsClosed();
@@ -341,6 +344,123 @@ internal static class Phase3FactAdapterTests
             recovery,
             Observation(generation + 1, 13_500, previousAtMs: 1000, previousSerial: 10));
         AssertEx.False(nextGeneration.IsIdle, "generation 变化必须清 Idle");
+    }
+
+    private static void MotionRuntimeTracksThresholdsAndResets()
+    {
+        const long generation = 41;
+        var state = BlmMotionRuntimeState.Empty;
+        state = BlmMotionRuntimeMemory.Reduce(
+            state,
+            MotionObservation(generation, 1_000, isMoving: true));
+        AssertEx.Equal(0d, state.MovingDurationMs, "首次移动帧不应虚构已移动时长");
+
+        state = BlmMotionRuntimeMemory.Reduce(
+            state,
+            MotionObservation(generation, 2_500, isMoving: true));
+        AssertEx.Equal(1_500d, state.MovingDurationMs, "移动时长累计错误");
+
+        state = BlmMotionRuntimeMemory.Reduce(
+            state,
+            MotionObservation(generation, 3_000, isMoving: false));
+        AssertEx.Equal(0d, state.StationaryDurationMs, "刚停止移动不应虚构站立时长");
+        state = BlmMotionRuntimeMemory.Reduce(
+            state,
+            MotionObservation(generation, 6_000, isMoving: false));
+        AssertEx.Equal(3_000d, state.StationaryDurationMs, "站立时长累计错误");
+
+        state = BlmMotionRuntimeMemory.Reduce(
+            state,
+            MotionObservation(generation, 6_100, isMoving: true));
+        AssertEx.Equal(0d, state.StationaryDurationMs, "重新移动必须清零站立时长");
+        AssertEx.Equal(0d, state.MovingDurationMs, "重新移动必须重新起算");
+
+        state = BlmMotionRuntimeMemory.Reduce(
+            state,
+            MotionObservation(generation, 7_000, isMoving: true, inCombat: false));
+        AssertEx.Equal(0d, state.MovingDurationMs, "离战不得泄漏移动时长");
+        AssertEx.Equal(0d, state.StationaryDurationMs, "离战不得泄漏站立时长");
+        AssertEx.Equal(0d, state.GcdStarvationMs, "离战不得泄漏 GCD 空转时长");
+
+        state = BlmMotionRuntimeMemory.Reduce(
+            state,
+            MotionObservation(generation + 1, 8_000, isMoving: false));
+        AssertEx.Equal(0d, state.StationaryDurationMs, "generation 变化必须重新起算");
+        AssertEx.Equal(0d, state.GcdStarvationMs, "generation 变化必须清零 GCD 空转");
+    }
+
+    private static void GcdStarvationSurvivesCastInterruption()
+    {
+        const long generation = 43;
+        var state = BlmMotionRuntimeState.Empty;
+        state = BlmMotionRuntimeMemory.Reduce(
+            state,
+            MotionObservation(generation, 1_000, isMoving: true));
+        AssertEx.Equal(0d, state.GcdStarvationMs, "首个有效帧不应虚构 GCD 空转");
+
+        state = BlmMotionRuntimeMemory.Reduce(
+            state,
+            MotionObservation(generation, 2_000, isMoving: true));
+        AssertEx.Equal(1_000d, state.GcdStarvationMs, "无成功 GCD 时空转必须累计");
+
+        // 站定读条不清零空转：只有 GCD 成功才清零，读条被拉断不影响累计。
+        state = BlmMotionRuntimeMemory.Reduce(
+            state,
+            MotionObservation(generation, 3_000, isMoving: false));
+        AssertEx.Equal(2_000d, state.GcdStarvationMs, "站定读条不得清零 GCD 空转");
+
+        state = BlmMotionRuntimeMemory.Reduce(
+            state,
+            MotionObservation(generation, 4_000, isMoving: true));
+        AssertEx.Equal(3_000d, state.GcdStarvationMs, "拉断后重新移动必须继续累计空转");
+
+        // 转好时刻推进后空转重新起算。
+        state = BlmMotionRuntimeMemory.Reduce(
+            state,
+            MotionObservation(generation, 4_500, isMoving: false, lastGcdReadyAtMs: 4_500));
+        AssertEx.Equal(0d, state.GcdStarvationMs, "GCD 成功帧不应虚构空转");
+        state = BlmMotionRuntimeMemory.Reduce(
+            state,
+            MotionObservation(generation, 6_000, isMoving: true, lastGcdReadyAtMs: 4_500));
+        AssertEx.Equal(1_500d, state.GcdStarvationMs, "空转必须从上一发 GCD 的转好时刻起算");
+
+        // 上一场的旧 Ack 时间戳不得撑大新代际的空转计时。
+        state = BlmMotionRuntimeMemory.Reduce(
+            state,
+            MotionObservation(generation + 1, 7_000, isMoving: true, lastGcdReadyAtMs: 4_500));
+        AssertEx.Equal(0d, state.GcdStarvationMs, "新代际不得以旧 Ack 为基准起算空转");
+        state = BlmMotionRuntimeMemory.Reduce(
+            state,
+            MotionObservation(generation + 1, 8_000, isMoving: true, lastGcdReadyAtMs: 4_500));
+        AssertEx.Equal(1_000d, state.GcdStarvationMs, "新代际空转必须从首个有效帧起算");
+    }
+
+    private static void InstantGcdPushesStarveBaseToGcdReady()
+    {
+        var hardcast = Success(7, 1, BLMSkill.炽炎, isGcd: true);
+        AssertEx.Equal(
+            1_001L,
+            BlmResolverInputAdapter.ResolveLastGcdReadyAtMs(hardcast, 2.5f),
+            "读条 GCD 的空转基准必须是成功时刻本身");
+        AssertEx.Equal(
+            3_501L,
+            BlmResolverInputAdapter.ResolveLastGcdReadyAtMs(
+                hardcast with { WasInstant = true }, 2.5f),
+            "瞬发 GCD 的空转基准必须加算 GCD 总长");
+        AssertEx.Equal(
+            3_401L,
+            BlmResolverInputAdapter.ResolveLastGcdReadyAtMs(
+                hardcast with { WasInstant = true }, 2.4f),
+            "瞬发 GCD 的空转基准必须按实际 GCD 总长折算");
+        AssertEx.Equal(
+            3_501L,
+            BlmResolverInputAdapter.ResolveLastGcdReadyAtMs(
+                hardcast with { WasInstant = true }, 0f),
+            "GCD 总长缺失时必须按 2.5 秒兜底");
+        AssertEx.Equal(
+            0L,
+            BlmResolverInputAdapter.ResolveLastGcdReadyAtMs(null, 2.5f),
+            "没有上一发 GCD 时不得虚构空转基准");
     }
 
     private static void AvailableInstantGcdControlsForcedRecovery()
@@ -687,6 +807,22 @@ internal static class Phase3FactAdapterTests
             PreviousGcdSerial: previousSerial,
             HasAvailableInstantGcd: hasAvailableInstantGcd,
             SwiftcastCurrentlyAvailable: swiftcastReady);
+
+    private static BlmMotionRuntimeObservation MotionObservation(
+        long generation,
+        long capturedAtMs,
+        bool isMoving,
+        bool inCombat = true,
+        long lastGcdReadyAtMs = 0)
+        => new(
+            generation,
+            capturedAtMs,
+            IsAvailable: true,
+            AcrEnabled: true,
+            InCombat: inCombat,
+            IsAlive: true,
+            IsMoving: isMoving,
+            LastGcdReadyAtMs: lastGcdReadyAtMs);
 
     private static BlmActionSuccess Success(
         long generation,

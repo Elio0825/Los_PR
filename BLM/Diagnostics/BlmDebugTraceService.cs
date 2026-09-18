@@ -318,6 +318,14 @@ internal sealed class BlmDebugTraceService : IBlmDebugSink, IBlmDebugViewSource,
             HighPriorityQueueActive = draft.HighPriorityQueueActive,
             RemainingWeaves = draft.RemainingWeaves,
             FactCoverage = BlmDebugText.Clean(draft.FactCoverage),
+            GcdStarvationMs = draft.GcdStarvationMs,
+            MovingDurationMs = draft.MovingDurationMs,
+            StationaryDurationMs = draft.StationaryDurationMs,
+            HasAvailableInstantGcd = draft.HasAvailableInstantGcd,
+            MoveTriplecastSeconds = draft.MoveTriplecastSeconds,
+            TriplecastCharges = draft.TriplecastCharges,
+            TriplecastCooldownRemainMs = draft.TriplecastCooldownRemainMs,
+            TriplecastCanCast = draft.TriplecastCanCast,
         };
     }
 

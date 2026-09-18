@@ -15,6 +15,7 @@ Los 是面向 PromeRotation 的《最终幻想 XIV》黑魔法师 ACR，实现�
 - 起手被手动技能打断后按检查点恢复，完整执行到魔泉后交回常规 ACR
 - QT、Hotkey 独立面板及单项显示控制
 - 键盘单键、组合键和鼠标侧键绑定
+- 黑魔纹热键随当前技能形态使用黑魔纹或魔纹重置，并按实际技能确认回执
 - 时间轴控制 QT、Hotkey，并检测火冰状态、层数、火苗、冰针、悖论和通晓资源
 - 概览、战斗、风格、热键、Debug 五页控制台
 - 中文可读 Debug 日志，同时保留机器可分析的 JSONL
@@ -62,15 +63,15 @@ dotnet run --project .\Tests\Los.Tests.csproj -c Release --no-build `
   -p:DalamudHooksDir=<Dalamud Hooks 目录>
 ```
 
-当前测试覆盖 19 个测试组，包括多等级单体/AOE Resolver、Tracker 生命周期、新日志 ActionEffect 接入、起手恢复、时间轴、爆发药 Hotkey、快捷键持久化、Debug 日志和 DLL 公共 API 边界。
+测试覆盖多等级单体/AOE Resolver、Tracker 生命周期、新日志 ActionEffect 接入、起手恢复、时间轴、爆发药 Hotkey、黑魔纹热键技能形态与回执、快捷键持久化、Debug 日志和 DLL 公共 API 边界。
 
 ## 自动发布
 
 推送 `v*` 标签，或在 GitHub Actions 中手动运行 `Build and Release` 并填写版本号，即可自动完成 API15 SDK 恢复、Release 构建、`Los.zip` 和 `repo.json` 生成、SHA-256 计算与 GitHub Release 发布：
 
 ```powershell
-git tag v0.1.6
-git push origin v0.1.6
+git tag v1.0.0
+git push origin v1.0.0
 ```
 
 自动发布不会打包 PromeRotation、Dalamud 或 ECommons，仅包含运行所需的 `Los.dll` 与 `Los.deps.json`。
@@ -81,7 +82,7 @@ git push origin v0.1.6
 .\scripts\New-AcrRelease.ps1 `
   -PromeRotationDir <PromeRotation 插件目录> `
   -DalamudHooksDir <Dalamud Hooks 目录> `
-  -Version 0.1.6
+  -Version 1.0.0
 ```
 
 构建输出：

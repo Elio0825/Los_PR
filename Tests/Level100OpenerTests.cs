@@ -21,6 +21,7 @@ internal static class Level100OpenerTests
         DailyWaitsForCombatAndCompletesFivePlusSevenWithoutPotion();
         DailyRequiresDailyPresetAndSinglePartyEightPlayerDuty();
         CountdownFireThreeBridgesBeforeInCombatAndRebindsGeneration();
+        CountdownDefersBindingUntilTargetIsAvailable();
         MissingAckCancelsInsteadOfSkippingTheStep();
         TargetModeAndManualOverrideCancelTheWholeSequence();
         DotDisabledUsesAlwaysBridgeAfterFireThree();
@@ -281,6 +282,48 @@ internal static class Level100OpenerTests
         AssertEx.Equal(BlmOpenerStatus.Executing, snapshot.Status, "进战Generation切换不得取消高难起手");
         AssertEx.True(snapshot.HasPendingAction, "进战后必须保留并重绑定桥接雷的Pending");
         AssertEx.True(tracker.GetTrackerSnapshot().HasPendingIssuedAction, "Tracker必须持有重绑定后的唯一Pending");
+    }
+
+    private static void CountdownDefersBindingUntilTargetIsAvailable()
+    {
+        var clock = new FakeClock();
+        var initial = ReadyOpenerContext(inCombat: false) with
+        {
+            HasTarget = false,
+            HasValidTarget = false,
+            InRange = false,
+            TargetEntityId = 0,
+            TargetDistance = 0f,
+        };
+        var tracker = new BlmStateTracker(initial, clock, IdentityBlmActionIdNormalizer.Instance);
+        var service = CreateService(tracker, clock);
+
+        AssertEx.True(
+            service.TryArmCountdown(
+                tracker.GetContextSnapshot(),
+                EnabledWithoutPotion,
+                potionId: 0),
+            "倒计时目标短暂丢失时应保留待绑定起手");
+        service.Update(tracker.GetContextSnapshot(), false, EnabledWithoutPotion, 3f);
+        AssertEx.True(service.OwnsExecution, "待绑定目标期间起手不得立即取消");
+        AssertEx.True(
+            service.TryCreateCountdownPrecastAction(tracker.GetContextSnapshot()) is null,
+            "无目标时不得生成爆炎预读动作");
+
+        var targetAvailable = initial with
+        {
+            HasTarget = true,
+            HasValidTarget = true,
+            InRange = true,
+            TargetEntityId = 201,
+            TargetDistance = 10f,
+            CapturedAtMs = clock.NowMs,
+        };
+        tracker.Reconcile(targetAvailable);
+        var precast = service.TryCreateCountdownPrecastAction(tracker.GetContextSnapshot());
+        AssertEx.True(precast is not null, "预读时目标恢复后必须生成爆炎");
+        AssertEx.Equal(BLMSkill.爆炎, precast!.ActionId, "延迟绑定预读动作错误");
+        AssertEx.Equal(201u, precast.NetworkTid, "延迟绑定必须使用当前目标");
     }
 
     private static void MissingAckCancelsInsteadOfSkippingTheStep()

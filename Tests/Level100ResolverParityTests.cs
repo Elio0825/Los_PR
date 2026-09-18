@@ -652,6 +652,7 @@ internal static class Level100ResolverParityTests
             Context = input.Context with
             {
                 IsMoving = true,
+                GcdStarvationMs = 1_500,
                 HasThunderhead = false,
                 PolyglotStacks = 1,
             },
@@ -674,7 +675,11 @@ internal static class Level100ResolverParityTests
 
         var earlyThunder = input with
         {
-            Context = input.Context with { IsMoving = true },
+            Context = input.Context with
+            {
+                IsMoving = true,
+                GcdStarvationMs = 1_500,
+            },
             DotTargets =
             [
                 Target(CurrentTargetId, 1_000_000, 900_000, 10f, 5000f, 5000f),
@@ -717,6 +722,63 @@ internal static class Level100ResolverParityTests
             "Ability.三连咏唱",
             "独立移动三连");
         AssertEx.Equal(50, moveTriplecastFrame.OffGcdCandidate!.CheckCode, "移动三连放行码必须保留50");
+        AssertEx.True(
+            Level100ResolverEngine.Evaluate(moveTriplecast with
+            {
+                Context = moveTriplecast.Context with { HasParadox = true },
+            }).OffGcdCandidate is null,
+            "移动中有可用悖论时必须优先保留悖论，不得排队三连");
+        AssertEx.True(
+            Level100ResolverEngine.Evaluate(moveTriplecast with
+            {
+                Context = moveTriplecast.Context with { PolyglotStacks = 1 },
+                Settings = moveTriplecast.Settings with { MoveXenoglossyEnabled = true },
+            }).OffGcdCandidate is null,
+            "移动中有可用异言时必须优先保留异言，不得排队三连");
+        var queueCandidate = Level100ResolverEngine.Evaluate(moveTriplecast with
+        {
+            Context = moveTriplecast.Context with { GcdRemainSeconds = 0f },
+            PreviousGcd = null,
+            RecentHistory = [],
+        });
+        AssertCandidate(
+            queueCandidate.OffGcdCandidate,
+            BLMSkill.三连咏唱,
+            "Ability.三连咏唱",
+            "GCD结束且无织入窗口时移动三连应保留为队列候选");
+        var activeGcdQueueCandidate = Level100ResolverEngine.Evaluate(moveTriplecast with
+        {
+            Context = moveTriplecast.Context with { GcdRemainSeconds = 1.5f },
+            PreviousGcd = null,
+            RecentHistory = [],
+        });
+        AssertCandidate(
+            activeGcdQueueCandidate.OffGcdCandidate,
+            BLMSkill.三连咏唱,
+            "Ability.三连咏唱",
+            "GCD尚未结束时移动三连也应立即保留为队列候选");
+        AssertEx.True(
+            Level100ResolverEngine.Evaluate(moveTriplecast with
+            {
+                Context = moveTriplecast.Context with { GcdStarvationMs = 1_499 },
+            }).OffGcdCandidate is null,
+            "GCD 空转未达到秒数阈值时不得消耗三连");
+        AssertEx.True(
+            Level100ResolverEngine.Evaluate(moveTriplecast with
+            {
+                Context = moveTriplecast.Context with { TriplecastStacks = 1 },
+            }).OffGcdCandidate is null,
+            "身上已有三连 buff 时不得再产生移动三连候选");
+        AssertCandidate(
+            Level100ResolverEngine.Evaluate(SetAction(
+                moveTriplecast,
+                BLMSkill.三连咏唱,
+                charges: 1.58f,
+                cooldownRemainMs: 25_000d,
+                canCast: false)).OffGcdCandidate,
+            BLMSkill.三连咏唱,
+            "Ability.三连咏唱",
+            "充能期间 CanCast 误报 false 时，握有完整充能仍应放行移动三连");
         AssertEx.True(
             Level100ResolverEngine.Evaluate(moveTriplecast with
             {
@@ -1274,13 +1336,26 @@ internal static class Level100ResolverParityTests
             "详述必须先于Manafont");
 
         var leyLines = SetAction(
-            input,
+            input with
+            {
+                Context = input.Context with { StationaryDurationMs = 3_000 },
+            },
             BLMSkill.黑魔纹,
             charges: 1f,
             cooldownRemainMs: 0d);
         var leyCandidate = Level100ResolverEngine.Evaluate(leyLines).OffGcdCandidate;
         AssertCandidate(leyCandidate, BLMSkill.黑魔纹, "Ability.黑魔纹", "OffGCD黑魔纹优先级");
         AssertEx.Equal(28, leyCandidate!.ManifestOrder, "黑魔纹manifest顺序错误");
+        AssertCandidate(
+            Level100ResolverEngine.Evaluate(SetAction(
+                leyLines,
+                BLMSkill.黑魔纹,
+                charges: 1.5f,
+                cooldownRemainMs: 30_000d,
+                canCast: false)).OffGcdCandidate,
+            BLMSkill.黑魔纹,
+            "Ability.黑魔纹",
+            "黑魔纹充能期间 CanCast 误报 false 时，握有完整充能仍应放行");
         AssertEx.True(
             Level100ResolverEngine.Evaluate(leyLines with
             {

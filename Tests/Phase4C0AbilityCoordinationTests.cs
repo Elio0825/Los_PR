@@ -263,6 +263,7 @@ internal static class Phase4C0AbilityCoordinationTests
                     Context = Fire(BaseInput(66), mp: 10_000) with
                     {
                         IsMoving = true,
+                        GcdStarvationMs = 1_500,
                         IsCasting = false,
                     },
                     Settings = BaseInput(66).Settings with

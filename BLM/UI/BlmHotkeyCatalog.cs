@@ -47,7 +47,7 @@ internal static class BlmHotkeyCatalog
     private static long _nextPotionAttemptAtMs;
     private static int _potionAttemptCount;
 
-    private sealed class ManualAbilityRequest
+    internal sealed class ManualAbilityRequest
     {
         public ManualAbilityRequest(
             in BlmHotkeyDefinition definition,
@@ -61,10 +61,15 @@ internal static class BlmHotkeyCatalog
 
         public BlmHotkeyDefinition Definition { get; }
         public PAction Action { get; }
+        // 同一个热键的不同形态共享去重键，Action 则保留按下时的实际技能。
+        public uint PendingKey => Definition.ActionId;
         public long ExpiresAtMs { get; set; }
         public long NextAttemptAtMs { get; set; }
         public int Attempts { get; set; }
         public bool AwaitingAck { get; set; }
+
+        public bool MatchesCurrentAction(uint currentActionId)
+            => Action.ActionId == currentActionId;
     }
 
     public static IReadOnlyList<BlmHotkeyDefinition> Entries { get; } =
@@ -117,16 +122,19 @@ internal static class BlmHotkeyCatalog
             {
                 BlmHotkeyKind.LimitBreak => LimitBreakHelper.GetLimitBreakActionId(),
                 BlmHotkeyKind.Potion => PRGameData.GetBestPotionId(),
-                _ => definition.ActionId,
+                _ => ResolveManualActionId(definition.ActionId, ActionHelper.GetAdjustedActionId),
             };
         }
         catch
         {
-            return definition.Kind == BlmHotkeyKind.Action
+            return definition.Kind == BlmHotkeyKind.Action && definition.ActionId != 3573u
                 ? definition.ActionId
                 : 0u;
         }
     }
+
+    internal static uint ResolveManualActionId(uint actionId, Func<uint, uint> getAdjustedActionId)
+        => actionId == 3573u ? getAdjustedActionId(actionId) : actionId;
 
     public static IDalamudTextureWrap? ResolveIcon(in BlmHotkeyDefinition definition)
     {
@@ -154,11 +162,13 @@ internal static class BlmHotkeyCatalog
     }
 
     public static bool IsAvailable(in BlmHotkeyDefinition definition)
+        => IsAvailable(definition, ResolveActionId(definition));
+
+    private static bool IsAvailable(in BlmHotkeyDefinition definition, uint actionId)
     {
         if (IsBlockedByOpener(definition))
             return false;
 
-        var actionId = ResolveActionId(definition);
         if (actionId == 0)
             return false;
 
@@ -188,18 +198,18 @@ internal static class BlmHotkeyCatalog
             }
         }
 
-        var actionId = ResolveActionId(definition);
-        if (actionId == 0)
-            return false;
-
         if (definition.Type == ActionType.OffGcd)
         {
             lock (ManualAbilityGate)
             {
                 CleanupExpiredManualPendingNoLock(Environment.TickCount64);
-                return ManualAbilityPending.ContainsKey(actionId);
+                return ManualAbilityPending.ContainsKey(definition.ActionId);
             }
         }
+
+        var actionId = ResolveActionId(definition);
+        if (actionId == 0)
+            return false;
 
         try
         {
@@ -212,14 +222,16 @@ internal static class BlmHotkeyCatalog
     }
 
     public static float GetCooldown(in BlmHotkeyDefinition definition)
+        => GetCooldown(ResolveActionId(definition), definition.Kind);
+
+    private static float GetCooldown(uint actionId, BlmHotkeyKind kind)
     {
-        var actionId = ResolveActionId(definition);
         if (actionId == 0)
             return 0f;
 
         try
         {
-            return definition.Kind == BlmHotkeyKind.Potion
+            return kind == BlmHotkeyKind.Potion
                 ? ActionHelper.GetItemCooldown(NormalizeItemId(actionId))
                 : ActionHelper.GetActionCooldown(actionId);
         }
@@ -230,13 +242,15 @@ internal static class BlmHotkeyCatalog
     }
 
     public static int GetCharges(in BlmHotkeyDefinition definition)
+        => definition.Kind == BlmHotkeyKind.Action ? GetCharges(ResolveActionId(definition)) : 0;
+
+    private static int GetCharges(uint actionId)
     {
-        if (definition.Kind != BlmHotkeyKind.Action)
+        if (actionId == 0)
             return 0;
 
         try
         {
-            var actionId = ResolveActionId(definition);
             return ActionHelper.GetMaxCharges(actionId) > 1
                 ? Math.Max(0, (int)ActionHelper.GetActionCharges(actionId))
                 : 0;
@@ -258,7 +272,7 @@ internal static class BlmHotkeyCatalog
 
         if (definition.Kind == BlmHotkeyKind.Potion)
             return TryQueuePotion(actionId);
-        if (!IsAvailable(definition))
+        if (!IsAvailable(definition, actionId))
             return false;
 
         if (definition.Type == ActionType.OffGcd)
@@ -301,10 +315,14 @@ internal static class BlmHotkeyCatalog
 
         lock (ManualAbilityGate)
         {
-            if (ManualAbilityPending.Remove(actionId))
+            var request = RemoveObservedManualAbility(ManualAbilityPending, actionId);
+            if (request != null)
             {
                 ManualAbilityObserved[actionId] = Environment.TickCount64
                     + ManualAbilityObservedTimeoutMs;
+                Svc.Log.Info(
+                    $"[Los Hotkey] 手动能力技已观察到回执：{request.Definition.Name}，"
+                    + $"Original={request.PendingKey}，Actual={actionId}，AwaitingAck={request.AwaitingAck}");
             }
         }
 
@@ -316,6 +334,45 @@ internal static class BlmHotkeyCatalog
                 ClearPendingPotionNoLock();
             }
         }
+    }
+
+    internal static ManualAbilityRequest? RemoveObservedManualAbility(
+        Dictionary<uint, ManualAbilityRequest> pending,
+        uint observedActionId)
+    {
+        foreach (var entry in pending)
+        {
+            // 只接受冻结的实际技能，不能把黑魔纹与魔纹重置互相当作回执。
+            if (entry.Value.Action.ActionId != observedActionId)
+                continue;
+
+            pending.Remove(entry.Key);
+            return entry.Value;
+        }
+
+        return null;
+    }
+
+    internal static bool IsManualAbilityReady(
+        uint actionId,
+        Func<uint, float> readCooldown,
+        Func<uint, int> readCharges)
+        => readCooldown(actionId) <= 0.05f || readCharges(actionId) > 0;
+
+    internal static bool CancelChangedManualAbility(
+        Dictionary<uint, ManualAbilityRequest> pending,
+        ManualAbilityRequest request,
+        uint currentActionId)
+    {
+        if (request.AwaitingAck || request.MatchesCurrentAction(currentActionId))
+            return false;
+        if (!pending.TryGetValue(request.PendingKey, out var current)
+            || !ReferenceEquals(current, request))
+        {
+            return false;
+        }
+
+        return pending.Remove(request.PendingKey);
     }
 
     public static bool ConsumeManualAbilityObservation(uint actionId)
@@ -381,9 +438,14 @@ internal static class BlmHotkeyCatalog
         in BlmHotkeyDefinition definition,
         uint actionId)
     {
-        var cooldown = GetCooldown(definition);
-        if (cooldown > 0.05f && GetCharges(definition) == 0)
+        if (!IsManualAbilityReady(actionId, ReadManualAbilityCooldown, GetCharges))
+        {
+            Svc.Log.Info(
+                $"[Los Hotkey] 手动能力技拒绝：{definition.Name}，Reason=Cooldown，"
+                + $"Original={definition.ActionId}，Actual={actionId}，"
+                + $"Cooldown={ReadManualAbilityCooldown(actionId):0.000}s，Charges={GetCharges(actionId)}");
             return false;
+        }
 
         var action = new PAction(actionId, definition.Type, definition.Target);
         if (definition.UseMouseGround)
@@ -398,19 +460,19 @@ internal static class BlmHotkeyCatalog
             lock (ManualAbilityGate)
             {
                 CleanupExpiredManualPendingNoLock(now);
-                if (ManualAbilityPending.ContainsKey(actionId))
+                var request = new ManualAbilityRequest(definition, action, now);
+                if (!ManualAbilityPending.TryAdd(request.PendingKey, request))
                 {
+                    Svc.Log.Info(
+                        $"[Los Hotkey] 手动能力技拒绝：{definition.Name}，Reason=AlreadyPending，"
+                        + $"Original={definition.ActionId}，Actual={actionId}");
                     return false;
                 }
-
-                ManualAbilityPending[actionId] = new ManualAbilityRequest(
-                    definition,
-                    action,
-                    now);
             }
 
             Svc.Log.Info(
                 $"[Los Hotkey] 手动能力技进入等待：{definition.Name}({actionId})，"
+                + $"Original={definition.ActionId}，Actual={actionId}，"
                 + $"Casting={PRCore.Me?.IsCasting == true}，"
                 + $"GcdRemain={ActionHelper.GetGcdRemain():0.000}s");
             return true;
@@ -418,7 +480,7 @@ internal static class BlmHotkeyCatalog
         catch (Exception exception)
         {
             lock (ManualAbilityGate)
-                ManualAbilityPending.Remove(actionId);
+                ManualAbilityPending.Remove(definition.ActionId);
             Svc.Log.Warning(exception, $"[Los] Hotkey 手动能力技注册失败：{definition.Name}。");
             return false;
         }
@@ -442,7 +504,8 @@ internal static class BlmHotkeyCatalog
             {
                 ManualAbilityPending.Remove(pending.Key);
                 Svc.Log.Warning(
-                    $"[Los Hotkey] 手动能力技等待超时：{pending.Value.Definition.Name}({pending.Key})，"
+                    $"[Los Hotkey] 手动能力技等待超时：{pending.Value.Definition.Name}，"
+                    + $"Original={pending.Key}，Actual={pending.Value.Action.ActionId}，"
                     + $"Attempts={pending.Value.Attempts}，AwaitingAck={pending.Value.AwaitingAck}");
             }
         }
@@ -531,20 +594,38 @@ internal static class BlmHotkeyCatalog
 
                 lock (ManualAbilityGate)
                 {
-                    if (!ManualAbilityPending.TryGetValue(request.Action.ActionId, out var current)
+                    if (!ManualAbilityPending.TryGetValue(request.PendingKey, out var current)
                         || !ReferenceEquals(current, request))
                     {
                         continue;
                     }
 
-                    ManualAbilityPending.Remove(request.Action.ActionId);
+                    ManualAbilityPending.Remove(request.PendingKey);
                     ManualAbilityObserved[request.Action.ActionId] = now
                         + ManualAbilityObservedTimeoutMs;
                 }
 
                 Svc.Log.Warning(
                     $"[Los Hotkey] 手动能力技等待服务器回执超时：{request.Definition.Name}"
-                    + $"({request.Action.ActionId})，Attempts={request.Attempts}");
+                    + $"，Original={request.PendingKey}，Actual={request.Action.ActionId}，Attempts={request.Attempts}");
+                continue;
+            }
+
+            var currentActionId = ResolveActionId(request.Definition);
+            if (!request.MatchesCurrentAction(currentActionId))
+            {
+                bool cancelled;
+                lock (ManualAbilityGate)
+                {
+                    cancelled = CancelChangedManualAbility(ManualAbilityPending, request, currentActionId);
+                }
+
+                if (cancelled)
+                {
+                    Svc.Log.Info(
+                        $"[Los Hotkey] 手动能力技取消：{request.Definition.Name}，Reason=ActionChanged，"
+                        + $"Original={request.PendingKey}，Requested={request.Action.ActionId}，Current={currentActionId}");
+                }
                 continue;
             }
 
@@ -558,7 +639,7 @@ internal static class BlmHotkeyCatalog
             var submittedAt = Environment.TickCount64;
             lock (ManualAbilityGate)
             {
-                if (!ManualAbilityPending.TryGetValue(request.Action.ActionId, out var current)
+                if (!ManualAbilityPending.TryGetValue(request.PendingKey, out var current)
                     || !ReferenceEquals(current, request))
                 {
                     continue;
@@ -572,7 +653,7 @@ internal static class BlmHotkeyCatalog
                 }
                 else if (request.Attempts >= ManualAbilityMaxAttempts)
                 {
-                    ManualAbilityPending.Remove(request.Action.ActionId);
+                    ManualAbilityPending.Remove(request.PendingKey);
                 }
                 else
                 {
@@ -583,6 +664,7 @@ internal static class BlmHotkeyCatalog
             Svc.Log.Info(
                 $"[Los Hotkey] 手动能力技提交：{request.Definition.Name}"
                 + $"({request.Action.ActionId})，Attempt={request.Attempts}，"
+                + $"Original={request.PendingKey}，Actual={request.Action.ActionId}，"
                 + $"UseActionReturn={dispatched}，Casting={PRCore.Me?.IsCasting == true}，"
                 + $"GcdRemain={ActionHelper.GetGcdRemain():0.000}s");
         }
@@ -602,8 +684,7 @@ internal static class BlmHotkeyCatalog
             return false;
         }
 
-        var cooldown = GetCooldown(request.Definition);
-        if (cooldown > 0.05f && GetCharges(request.Definition) == 0)
+        if (!IsManualAbilityReady(request.Action.ActionId, ReadManualAbilityCooldown, GetCharges))
             return false;
 
         if (request.Action.IsLocationAction)
@@ -618,6 +699,9 @@ internal static class BlmHotkeyCatalog
             return false;
         }
     }
+
+    private static float ReadManualAbilityCooldown(uint actionId)
+        => GetCooldown(actionId, BlmHotkeyKind.Action);
 
     private static unsafe bool DispatchManualAbility(PAction action)
     {

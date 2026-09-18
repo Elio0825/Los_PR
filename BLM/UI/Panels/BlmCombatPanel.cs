@@ -452,7 +452,7 @@ internal static class BlmCombatPanel
         if (DrawInsetSliderFloat(
                 "battle_move_triplecast_seconds",
                 "三连走位秒数",
-                "连续走位达到阈值时使用",
+                "移动中 GCD 空转达到阈值时使用，瞬发后从冷却转好起算",
                 ref moveSeconds,
                 0f,
                 10f,

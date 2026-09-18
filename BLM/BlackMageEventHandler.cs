@@ -182,7 +182,10 @@ internal sealed class BlackMageEventHandler : IRotationEventHandler, IDisposable
                 return;
             }
 
-            BeginProductionFrame(context, input);
+            if (BeginProductionFrame(context, input))
+            {
+                _execution.TryQueueMovementTriplecast(context);
+            }
         }
         catch (Exception exception)
         {
